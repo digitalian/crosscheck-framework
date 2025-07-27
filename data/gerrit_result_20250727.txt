@@ -1,0 +1,9 @@
+Project                        N    a_hat    b_dir
+bazel                       8896    1.000    0.000
+platform/external/okhttp      89    0.910    0.090
+plugins/checks                20    0.650    0.350
+plugins/owners               188    0.872    0.128
+plugins/replication           81    0.617    0.383
+
+Weighted avg (all)          9274   0.992   0.008
+Weighted avg (legacy)        289   0.785   0.215
