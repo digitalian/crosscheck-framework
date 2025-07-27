@@ -13,6 +13,7 @@ It provides
 
 ```bash
 ./run.sh
+```
 
 The script will
 
@@ -24,7 +25,6 @@ open a Streamlit dashboard at http://localhost:8501
 (Ctrl-C to quit)
 
 Tested on macOS 14 (Python 3.9) and Ubuntu 22.04 (Python 3.10).
-```
 
 ---
 
@@ -32,4 +32,4 @@ Tested on macOS 14 (Python 3.9) and Ubuntu 22.04 (Python 3.10).
 
 * If you later **re-enable pyenv**, simply replace the first block with the previous pyenv logic; everything else stays the same.  
 * The Streamlit app reads Gerrit live each time, so the GUI reflects the same data that the CLI just printed.
-::contentReference[oaicite:0]{index=0}
+
