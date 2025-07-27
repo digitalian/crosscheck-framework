@@ -1,13 +1,3 @@
-# Keep the snapshot committed (edit the date to match the file you commit)
-!data/gerrit_result_20250726.txt
-!data/gerrit_sample_all_20250726.json
-!data/gerrit_sample_corrected_20250726.json
-
-# Ignore any other dated reruns
-data/gerrit_result_*.txt
-data/gerrit_sample_all_*.json
-data/gerrit_sample_corrected_*.json
-
 # Virtual-env
 /.venv/
 
