@@ -1,0 +1,161 @@
+# crosscheck_sim_promac_bw_v7.py
+# Streamlit ≥1.35 | pip install streamlit plotly numpy pandas
+
+import streamlit as st
+import numpy as np
+import pandas as pd
+import plotly.express as px
+
+st.set_page_config(page_title="Cross-Check Simulator (B/W)", layout="wide")
+
+# ───────────────────────────────
+LANG = st.sidebar.radio("Language / 言語", ("EN", "JA"))
+TXT = {
+    "EN": {"input":"INPUTS","output":"Headline outputs",
+           "a_total":"a_total","succ":"S","C":"C","Closs":"C_loss","E":"E_total",
+           "tornado_title":"Tornado (±20 %)","tornado_hint":"Dark = top driver(s).",
+           "spider_title":"Slope (1−S)/S","spider_hint":"Lower bar = more robust.",
+           "qs_title":"E_total & Success","qs_hint":"Bars = E_total; labels = success.",
+           "mc_title":"Monte-Carlo (1 000)",
+           "mc_hint":"Variable selectable; dashed = 90 % CI, solid = **mean**."},
+    "JA": {"input":"入力パネル","output":"主要出力指標",
+           "a_total":"a_total","succ":"成功率 S","C":"C（工数）","Closs":"C_loss（損失込）","E":"E_total（コスト/成功）",
+           "tornado_title":"トルネード図（±20 %）","tornado_hint":"濃灰＝最大感度バー。",
+           "spider_title":"傾き (1−S)/S","spider_hint":"小さいほどロバスト。",
+           "qs_title":"品質×納期 2×2","qs_hint":"棒＝E_total、上＝成功率。",
+           "mc_title":"モンテカルロ（1 000 回）",
+           "mc_hint":"表示変数選択可。点線＝90 % 区間，実線＝**平均値**。"}
+}[LANG]
+
+# ───────────────────────────────
+# Sidebar inputs
+st.sidebar.title(TXT["input"])
+a1 = st.sidebar.slider("a1", 0.5, 1.0, 0.95, 0.01)
+a2 = st.sidebar.slider("a2", 0.5, 1.0, 0.95, 0.01)
+a3 = st.sidebar.slider("a3", 0.5, 1.0, 0.80, 0.01)
+b0 = st.sidebar.slider("checker b", 0.5, 1.0, 0.80, 0.01)
+qual  = st.sidebar.selectbox("Qual-Grade", ["Standard", "Low"])
+sched = st.sidebar.selectbox("Schedule",   ["OnTime",   "Late"])
+Lunit = st.sidebar.slider("Loss unit", 0, 200, 50, 10)
+T1, T2, T3 = [st.sidebar.number_input(f"T{i} (h)", 1, 200, v)
+              for i, v in zip((1,2,3), (10,10,30))]
+cross_ratio = st.sidebar.slider("Cross-ratio",0.0,0.5,0.30,0.01)
+prep_ratio  = st.sidebar.slider("Prep+Post", 0.0,0.5,0.40,0.01)
+
+# ───────────────────────────────
+# Deterministic core
+qual_T, qual_B  = (1,1) if qual=="Standard" else (2/3,0.8)
+sched_T, sched_B= (1,1) if sched=="OnTime"   else (2/3,0.8)
+a_total = a1*a2*a3
+b_eff   = b0*qual_B*sched_B
+S       = 1 - (1-a_total)*(1-b_eff)
+T_total = (T1+T2+T3)*qual_T*sched_T
+C       = T_total*(1+cross_ratio+prep_ratio)
+C_loss  = C + Lunit*(1-S)
+E_total = C_loss / S
+
+# ───────────────────────────────
+left,right = st.columns([1,2])
+with left:
+    st.subheader(TXT["output"])
+    st.metric(TXT["a_total"], f"{a_total:.3f}")
+    st.metric(TXT["succ"],    f"{S:.2%}")
+    st.metric(TXT["C"],       f"{C:.1f}")
+    st.metric(TXT["Closs"],   f"{C_loss:.1f}")
+    st.metric(TXT["E"],       f"{E_total:.1f}")
+
+def compute_E(a1v=a1,a2v=a2,a3v=a3,b0v=b0,CRv=cross_ratio,Lv=Lunit):
+    a_tot=a1v*a2v*a3v
+    Sx=1-(1-a_tot)*(1-b0v*qual_B*sched_B)
+    Cx=((T1+T2+T3)*qual_T*sched_T)*(1+CRv+prep_ratio)
+    return (Cx+Lv*(1-Sx))/Sx
+
+# ───────────────────────────────
+with right:
+    ## Tornado (B/W, same as v6)
+    dark="#333333"; light="#BBBBBB"
+    # ... [Tornado code unchanged] ...
+
+    params=dict(a1=a1,a2=a2,a3=a3,b0=b0,CR=cross_ratio,L=Lunit)
+    name_map={"a1":"a1v","a2":"a2v","a3":"a3v","b0":"b0v","CR":"CRv","L":"Lv"}
+    rows=[]
+    for k,v in params.items():
+        lo=max(v*0.8,0); hi=min(v*1.2,1) if k=="b0" else v*1.2
+        delta=max(abs(compute_E(**{name_map[k]:lo})-E_total),
+                  abs(compute_E(**{name_map[k]:hi})-E_total))
+        rows.append((k,delta))
+    df_t=pd.DataFrame(rows,columns=["param","delta"]).sort_values("delta",ascending=False)
+    max_delta=df_t["delta"].max()
+    df_t["color"]=np.where(np.isclose(df_t["delta"],max_delta,atol=1e-9),dark,light)
+    fig_t=px.bar(df_t,x="delta",y="param",orientation="h",color="color",
+                 color_discrete_map={dark:dark,light:light},
+                 labels={"delta":"|ΔE|","param":""})
+    fig_t.update_layout(showlegend=False,
+                        yaxis=dict(categoryorder='total ascending'))
+    st.plotly_chart(fig_t,use_container_width=True)
+
+    ## Slope bar (unchanged, medium gray)
+    st.markdown(f"**{TXT['spider_title']}**")
+    st.caption(TXT["spider_hint"])
+    slope=lambda s:(1-s)/s
+    S_auto = 1 - (1 - a1*a2*1)*(1 - b0*qual_B*sched_B)
+    S_low  = 1 - (1 - a_total)*(1 - b0*0.8*0.8)
+    df_s=pd.DataFrame([("Current",slope(S)),
+                       ("Auto+Check",slope(S_auto)),
+                       ("Low/Late",slope(S_low))],
+                      columns=["Case","Slope"])
+    fig_s=px.bar(df_s,x="Case",y="Slope",text_auto=".003f",
+                 color_discrete_sequence=["#777777"])
+    fig_s.update_traces(textposition="outside")
+    st.plotly_chart(fig_s,use_container_width=True)
+
+    ## Qual/Sched (unchanged)
+    st.markdown(f"**{TXT['qs_title']}**")
+    st.caption(TXT["qs_hint"])
+    sc=[("Std/On","Standard","OnTime"),("Std/Late","Standard","Late"),
+        ("Low/On","Low","OnTime"),("Low/Late","Low","Late")]
+    bars=[]
+    for n,qg,scd in sc:
+        qT,qB=(1,1) if qg=="Standard" else (2/3,0.8)
+        sT,sB=(1,1) if scd=="OnTime" else (2/3,0.8)
+        Sx=1-(1-a_total)*(1-b0*qB*sB)
+        Cx=(T1+T2+T3)*qT*sT*(1+cross_ratio+prep_ratio)
+        bars.append(dict(Scenario=n,E_total=(Cx+Lunit*(1-Sx))/Sx,S=f"{Sx:.1%}"))
+    fig_q=px.bar(pd.DataFrame(bars),x="Scenario",y="E_total",text="S",
+                 color_discrete_sequence=["#888888"])
+    st.plotly_chart(fig_q,use_container_width=True)
+
+# ───────────────────────────────
+# Monte-Carlo with mean line
+if st.sidebar.checkbox("Run Monte-Carlo (1 000)"):
+    mc_var = st.sidebar.selectbox("MC variable", ["E_total","Success S"])
+    st.markdown(f"**{TXT['mc_title']} – {mc_var}**")
+    st.caption(TXT["mc_hint"])
+
+    N,rng=1000,np.random.default_rng(0)
+    a1s=rng.normal(a1,0.03,N).clip(0,1)
+    a2s=rng.normal(a2,0.03,N).clip(0,1)
+    a3s=rng.normal(a3,0.03,N).clip(0,1)
+    CRs=rng.triangular(0.25,0.30,0.35,N)
+    b0s=rng.uniform(0.65,0.90,N)
+    Ls =rng.lognormal(mean=np.log(Lunit),sigma=0.3,size=N)
+
+    Evals,Svals=[],[]
+    for i in range(N):
+        a_tot=a1s[i]*a2s[i]*a3s[i]
+        S_i=1-(1-a_tot)*(1-b0s[i]*qual_B*sched_B)
+        C_i=(T1+T2+T3)*qual_T*sched_T*(1+CRs[i]+prep_ratio)
+        Evals.append((C_i+Ls[i]*(1-S_i))/S_i)
+        Svals.append(S_i)
+
+    data = Evals if mc_var=="E_total" else Svals
+    xlabel = "E_total" if mc_var=="E_total" else "Success S"
+    p5,p95 = np.percentile(data,[5,95])
+    mean   = np.mean(data)                    # ← 平均値
+    fig_h  = px.histogram(data,nbins=35,labels={"value":xlabel})
+    fig_h.update_traces(marker_color="#888888")
+    fig_h.add_vline(x=p5 ,line_color="#555555",line_width=2,line_dash="dot")
+    fig_h.add_vline(x=p95,line_color="#555555",line_width=2,line_dash="dot")
+    fig_h.add_vline(x=mean,line_color="#222222",line_width=2)     # ← 実線=平均
+    st.plotly_chart(fig_h,use_container_width=True)
+
