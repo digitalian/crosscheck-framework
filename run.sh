@@ -14,8 +14,8 @@ if [ ! -d "${VENV}" ]; then
   "${VENV}/bin/pip" install -r requirements.txt
 fi
 
-#echo ">> Running Gerrit CLI script (prints a_hat / b_dir table) …"
-#"${VENV}/bin/python" src/gerrit_ab_estimator_ratio_bazel.py
+echo ">> Running Gerrit CLI script (prints a_hat / b_dir table) …"
+"${VENV}/bin/python" src/gerrit_ab_estimator_ratio_bazel.py
 
 echo ">> Launching Streamlit dashboard …"
 echo "   (Ctrl-C to stop, then deactivate the venv: 'deactivate')"
