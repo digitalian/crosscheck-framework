@@ -6,7 +6,7 @@ This repository accompanies the paper
 It provides  
 * fully reproducible Python scripts (`src/`)  
 * a minimal data sample (`data/sample_changes.json`)  
-* a one-liner wrapper (`run.sh`) that creates a local virtual env via **pyenv**  
+* a one-liner wrapper (`run.sh`) that creates a local virtual env via **python3 venv**  
   and executes the CLI script.
 
 ## Quick Start (one line)
@@ -24,6 +24,7 @@ open a Streamlit dashboard at http://localhost:8501
 (Ctrl-C to quit)
 
 Tested on macOS 14 (Python 3.9) and Ubuntu 22.04 (Python 3.10).
+```
 
 ---
 
