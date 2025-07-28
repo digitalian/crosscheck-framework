@@ -1,6 +1,7 @@
 pygerrit2==2.0.14
-pandas>=2.1
+pandas>=2.1.4       # 2024年5月以降の安定版
 matplotlib>=3.8
 streamlit>=1.35
 plotly>=5.18
 watchdog>=4.0
+sympy>=1.12
