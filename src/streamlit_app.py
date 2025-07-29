@@ -1,5 +1,5 @@
-# crosscheck_sim_promac_bw_v8.py
-# Streamlit ≥1.35 | pip install streamlit plotly numpy pandas
+# crosscheck_sim_promac_bw_v9_relative.py
+# Streamlit ≥1.35 | pip install streamlit plotly numpy pandas sympy
 
 import streamlit as st
 import numpy as np
@@ -9,12 +9,36 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 
+# ───────────────────────────────
+# Centralized core calculation
+def compute_metrics(a1v=None, a2v=None, a3v=None, b0v=None, CRv=None, Pv=None, Lv=None):
+    # fill in defaults from current sidebar inputs when not provided
+    if a1v is None: a1v = a1
+    if a2v is None: a2v = a2
+    if a3v is None: a3v = a3
+    if b0v is None: b0v = b0
+    if CRv is None: CRv = cross_ratio
+    if Pv is None: Pv = prep_ratio
+    if Lv is None: Lv = Lunit
+    # reuse global qual and sched selectors
+    qual_T, qual_B = (1,1) if qual=="Standard" else (2/3,0.8)
+    sched_T, sched_B= (1,1) if sched=="OnTime"   else (2/3,0.8)
+    a_tot = a1v * a2v * a3v
+    b_eff = b0v * qual_B * sched_B
+    Sx    = 1 - (1 - a_tot) * (1 - b_eff)
+    Ttot  = (T1 + T2 + T3) * qual_T * sched_T
+    Cx    = Ttot * (1 + CRv + Pv)
+    C_lossx = Cx + Lv * Cx * (1 - Sx)
+    Ex    = Cx / Sx
+    E_totalx = C_lossx / Sx
+    return Sx, Cx, C_lossx, Ex, E_totalx
+
 st.set_page_config(page_title="Cross-Check Simulator (B/W)", layout="wide")
 
 # ───────────────────────────────
-# Text resources
+# Text resources (UNCHANGED)
 LANG = st.sidebar.radio("Language / 言語", ("EN", "JA"))
-TXT = {
+TXT_ALL = {
     "EN": {
         "input": "INPUT PANEL",
         "output": "KEY OUTPUT METRICS",
@@ -25,13 +49,16 @@ TXT = {
         "E_base": "Efficiency E (baseline)",
         "E_total": "E_total (cost per success)",
         "tornado_title": "Tornado Sensitivity (±20%)",
-        "tornado_hint": "Visualizes how much each parameter affects E when varied ±20%. Darker bars indicate parameters with the highest sensitivity and strongest influence on E.",
-        "spider_title": "Sensitivity Breakdown: Partial Derivative vs. Elasticity",
-        "spider_hint": "This chart compares two types of sensitivity: (1) Partial derivatives ∂E/∂x, which show the absolute effect of each parameter on E, and (2) Elasticity, which shows the relative (%-based) impact when a parameter changes by 1%. Partial sensitivity reflects raw influence; elasticity reflects scale-adjusted influence.",
+        "tornado_explain": "This chart visualizes the effect of ±20% changes in key parameters on E_total (cost per success).  \nSelected parameters (a₁, a₂, a₃, b₀, CR, PP, ℓ) are core drivers of success, effort, and loss.  \nThis helps identify which inputs most strongly affect cost-efficiency.",
+        "spider_title": "Standardized Sensitivity (∂E/∂x × σₓ/σ_E)",
+        "spider_explain": "This chart quantifies the influence of each parameter on E_total, normalized by its variability.  \nStandardized sensitivity highlights how strongly each uncertain factor contributes to the variance of cost efficiency.  \nUseful for uncertainty-based risk assessment. Includes loss-adjusted cost (C_total) and the approximated effect of total labor time (T_total).",
         "qs_title": "Quality × Schedule 2×2 Matrix",
-        "qs_hint": "Bar height represents E_total (cost per success), and the label shows the resulting success probability. Helps identify the optimal balance between quality (S) and cost (C).",
-        "mc_title": "Monte Carlo Summary Statistics (100,000 trials)",
-        "mc_hint": "Solid lines = median and mean; dashed = 95% confidence interval (5–95%). Based on 100,000 trials with a1–a3 ±3%, b’s cost 25–35%, and b’s success rate 70–90%. Close median–mean and narrow CI suggest model robustness."
+        "qs_explain": "Each bar shows E_total under different combinations of quality and schedule, with labels showing the corresponding success rate.  \nThis helps compare cost-performance tradeoffs across operational scenarios.",
+        "mc_title": "Monte Carlo Summary Statistics",
+        "mc_explain": "The following parameters are assigned probabilistic distributions to capture plausible uncertainty ranges:\n- **a₁, a₂**: Normally distributed (mean = selected value, σ = 0.03), reflecting variation in basic process success rates due to human or environmental variability.\n- **a₃**: Triangular distribution (±10%) to reflect process-specific asymmetry in the final step's reliability.\n- **b₀**: Uniform between 0.70–0.90, assuming checker quality varies widely across contexts.\n- **Cross-ratio (CR)** and **Prep/Post ratio (PP)**: Triangular (±20%) around selected values to reflect managerial estimation variance.\n- **Loss unit ℓ**: Triangular (±20%) for capturing business risk variability.\n\nThese distributions are selected based on empirical heuristics: normal for stable processes (a₁, a₂), triangular for bounded uncertain estimates (a₃, CR, PP, ℓ), and uniform for quality variability (b₀).",
+        "rel_title": "Relative Sensitivity (∂E/∂x × x/E)",
+        "rel_explain": "This chart shows the elasticity of E_total with respect to each parameter, representing the impact from a 1% input change.  \nRelative sensitivity helps identify which parameters most affect cost efficiency in response to design or policy changes.  \nUseful for prioritizing improvement efforts. Includes loss-adjusted cost (C_total) and approximated effect of total labor time (T_total).",
+        "mc_variable": "MC variable"
     },
     "JA": {
         "input": "入力パネル",
@@ -39,19 +66,23 @@ TXT = {
         "a_total": "a_total",
         "succ": "成功率 S",
         "C": "C（作業工数）",
-        "Closs": "C_total（損失を含む総コスト）",
+        "Closs": "C_total（損失込）",
         "E_base": "効率 E（ベースライン）",
         "E_total": "E_total（成功1件あたりの総コスト）",
-        "tornado_title": "トルネード感度分析（±20％）",
-        "tornado_hint": "各パラメータを±20％変化させたときの効率Eへの影響を示す。バーが濃いほど感度が高く、効率に強い影響を与える要因であることを示す。",
-        "spider_title": "感度分解：偏微分と相対感度の比較",
-        "spider_hint": "このグラフは、効率Eに対する感度を2種類の尺度で比較する：① 偏微分（∂E/∂x）は各パラメータがEに与える絶対的な影響を示し、② Elasticity（相対感度）は各パラメータを1％変化させたときにEが何％変化するかを示す。前者は「効果量」、後者は「影響の割合」に基づく指標である。",
-        "qs_title": "品質 × 納期の2×2マトリクス",
-        "qs_hint": "各バーの高さは E_total（成功1件あたりのコスト）を、ラベルはそのときの成功率 S を示す。品質（成功率）と納期（工数）のバランスを比較・選択するための視覚的な支援となる。",
-        "mc_title": "モンテカルロ要約統計（10万回試行）",
-        "mc_hint": "選択した変数の分布を表示する：実線は中央値（中位値）と平均値、点線は95%信頼区間（5–95%範囲）を示す。a1・a2・a3を±3%、bのコストを25–35%、bの成功率を70–90%で揺らして10万回試行した結果をもとに、モデルの安定性と妥当性を可視化する。中央値と平均が近く、CIが理論値周辺に収束していれば、ロバストなモデルと言える。"
+        "tornado_title": "トルネード感度分析（±20%）",
+        "tornado_explain": "このチャートは、主要パラメータを±20%変化させた際のE_total（成功1件あたりの総コスト）への影響を可視化します。  \n対象パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）は、成功率・作業工数・損失額に影響を与える主要因として選定しています。  \nこれにより、コスト効率に最も影響を与える要因を特定できます。",
+        "spider_title": "標準化感度（∂E/∂x × σₓ/σ_E）",
+        "spider_explain": "各パラメータのばらつきを基準にE_totalへの影響度を標準化して定量化します。  \n標準化感度は、コスト効率に対する不確実性（ばらつき）の寄与を示し、リスク評価に有効です。  \n損失込みのコスト（C_total）と全体作業時間（T_total）の影響も含めています。",
+        "qs_title": "品質×納期の2×2マトリクス",
+        "qs_explain": "品質と納期の組み合わせごとのE_totalを棒グラフで示し、ラベルとして成功率を表示します。  \n運用シナリオごとのコストパフォーマンスの比較に役立ちます。",
+        "mc_title": "モンテカルロ要約統計",
+        "mc_explain": "以下のパラメータに確率的な揺らぎを与え、不確実性をモデル化しています：\n- **a₁, a₂**：平均を中心とした正規分布（σ=0.03）、人的または環境要因による変動を想定。\n- **a₃**：±10%の三角分布。最終工程に特有の非対称性を考慮。\n- **b₀**：0.70～0.90の一様分布。チェック品質の個人差を反映。\n- **クロスチェック比率（CR）・準備/事後比率（PP）**：±20%の三角分布。マネジメント判断のばらつきを想定。\n- **損失単位 ℓ**：±20%の三角分布。ビジネスリスクのばらつきを反映。\n\nこれらの分布は、経験的な判断に基づいて選定しています。",
+        "rel_title": "相対感度（∂E/∂x × x/E）",
+        "rel_explain": "各パラメータを1%変更した際のE_totalへの影響度（弾性）を示します。  \n相対感度は設計変更や方針変更による影響度の大きさを示し，改善の優先順位づけに有効です。  \n損失込みのコスト（C_total）と全体作業時間（T_total）の影響も含めています。",
+        "mc_variable": "MC対象変数"
     }
-}[LANG]
+}
+TXT = TXT_ALL[LANG]
 
 # ───────────────────────────────
 # Sidebar inputs
@@ -81,263 +112,293 @@ C_loss  = C + Lunit * C * (1 - S)
 E       = C / S
 E_total = C_loss / S
 
-# 成功率 S を計算する関数
-def compute_S(a1v=a1, a2v=a2, a3v=a3, b0v=b0, CRv=cross_ratio, Pv=prep_ratio, Lv=Lunit):
-    a_tot = a1v * a2v * a3v
-    b_eff = b0v * qual_B * sched_B
-    return 1 - (1 - a_tot) * (1 - b_eff)
+# ───────────────────────────────
 
-def compute_E(a1v=a1, a2v=a2, a3v=a3, b0v=b0, CRv=cross_ratio, Pv=prep_ratio, Lv=Lunit):
-    """Compute E_total given parameters."""
-    a_tot = a1v * a2v * a3v
-    b_eff = b0v * qual_B * sched_B
-    Sx    = 1 - (1 - a_tot) * (1 - b_eff)
-    Ttot  = (T1 + T2 + T3) * qual_T * sched_T
-    Cx    = Ttot * (1 + CRv + Pv)
-    return (Cx + Lv * Cx * (1 - Sx)) / Sx
+# ───────────────────────────────
+# Pre-sample Monte Carlo for σ’s
+N, rng = 100_000, np.random.default_rng(0)
+a1s = rng.normal(a1, 0.03, N).clip(0,1)
+a2s = rng.normal(a2, 0.03, N).clip(0,1)
+a3s = rng.triangular(a3*0.9, a3, a3*1.1, N).clip(0,1) if a3>0 else np.zeros(N)
+CRs = rng.triangular(cross_ratio*0.8, cross_ratio, cross_ratio*1.2, N) if cross_ratio>0 else np.zeros(N)
+PPs = rng.triangular(prep_ratio*0.8, prep_ratio, prep_ratio*1.2, N) if prep_ratio>0 else np.zeros(N)
+b0s = rng.uniform(0.70, 0.90, N).clip(0,1)
+Ls  = rng.triangular(Lunit*0.8, Lunit, Lunit*1.2, N) if Lunit>0 else np.zeros(N)
+
+Evals = np.empty(N); Svals = np.empty(N); Cvals = np.empty(N)
+for i in range(N):
+    at = a1s[i]*a2s[i]*a3s[i]
+    be = b0s[i]*qual_B*sched_B
+    si = 1 - (1 - at)*(1 - be)
+    ci = (T1+T2+T3)*qual_T*sched_T*(1+CRs[i]+PPs[i])
+    Evals[i] = (ci + Ls[i]*ci*(1-si)) / si
+    Svals[i] = si
+    Cvals[i] = ci
+
+σE, σL, σC, σS = Evals.std(), Ls.std(), Cvals.std(), Svals.std()
+
+# ───────────────────────────────
+# Symbolic derivatives
+C_sym, S_sym, L_sym = sp.symbols("C S L")
+E_sym = (C_sym + L_sym*(1-S_sym)) / S_sym
+dE_dC = float(sp.diff(E_sym, C_sym).subs({C_sym:C, S_sym:S, L_sym:Lunit}))
+dE_dS = float(sp.diff(E_sym, S_sym).subs({C_sym:C, S_sym:S, L_sym:Lunit}))
+dE_dL = float(sp.diff(E_sym, L_sym).subs({C_sym:C, S_sym:S, L_sym:Lunit}))
+
+# Standardized sensitivities
+std_C = dE_dC * σC / σE
+std_S = dE_dS * σS / σE
+std_L = dE_dL * σL / σE
 
 # ───────────────────────────────
 left, right = st.columns([1, 2])
 with left:
     st.subheader(TXT["output"])
     st.metric(TXT["a_total"], f"{a_total:.4f}")
-    st.metric(TXT["succ"],    f"{S:.4f}")
-    st.metric(TXT["C"],       f"{C:.2f}")
-    st.metric(TXT["Closs"],   f"{C_loss:.2f}")
-    st.metric(TXT["E_base"],       f"{E:.2f}")
-    st.metric(TXT["E_total"], f"{E_total:.2f}")
+    Sx, Cx, C_lossx, Ex, E_totalx = compute_metrics(a1, a2, a3, b0, cross_ratio, prep_ratio, Lunit)
+    st.metric(TXT["succ"],    f"{Sx:.2%}")
+    st.metric(TXT["C"],       f"{Cx:.1f}")
+    st.metric(TXT["Closs"],   f"{C_lossx:.1f}")
+    st.metric(TXT["E_base"],  f"{Ex:.1f}")
+    st.metric(TXT["E_total"], f"{E_totalx:.1f}")
 
-# ───────────────────────────────
 with right:
     ## Quality × Schedule
-    st.markdown(f"**{TXT['qs_title']}**")
-    st.caption(TXT["qs_hint"])
-    scenarios = [
-      ("Std/On", "Standard","OnTime"),
-      ("Std/Late","Standard","Late"),
-      ("Low/On","Low","OnTime"),
-      ("Low/Late","Low","Late")
-    ]
-    bars = []
+    st.subheader(TXT['qs_title'])
+    st.markdown(TXT["qs_explain"])
+    scenarios = [("Std/On","Standard","OnTime"),
+                 ("Std/Late","Standard","Late"),
+                 ("Low/On","Low","OnTime"),
+                 ("Low/Late","Low","Late")]
+    bars=[]
     for name, qg, scd in scenarios:
-        qT, qB = (1,1) if qg=="Standard" else (2/3,0.8)
-        sT, sB = (1,1) if scd=="OnTime"   else (2/3,0.8)
-        Sx = 1 - (1 - a_total)*(1 - b0*qB*sB)
-        Cx = (T1+T2+T3)*qT*sT*(1+cross_ratio+prep_ratio)
-        bars.append(dict(Scenario=name, E_total=(Cx+Lunit*Cx*(1-Sx))/Sx, S=f"{Sx:.4f}"))
-    fig_q = px.bar(
-        pd.DataFrame(bars),
-        x="Scenario", y="E_total", text="S",
-        color_discrete_sequence=["#888888"]
-    )
+        qT,qB = (1,1) if qg=="Standard" else (2/3,0.8)
+        sT,sB = (1,1) if scd=="OnTime"   else (2/3,0.8)
+        # Scenario-specific metrics
+        # total success probability
+        a_tot_s = a1 * a2 * a3
+        b_eff_s = b0 * qB * sB
+        Sx = 1 - (1 - a_tot_s) * (1 - b_eff_s)
+        # total labor time
+        Ttot = (T1 + T2 + T3) * qT * sT
+        # labor cost
+        Cx = Ttot * (1 + cross_ratio + prep_ratio)
+        # cost including loss
+        C_lossx = Cx + Lunit * Cx * (1 - Sx)
+        # cost per successful outcome
+        E_totalx = C_lossx / Sx
+        bars.append(dict(Scenario=name,
+                         E_total=E_totalx,
+                         S=f"{Sx:.1%}"))
 
-    # E = 90 の基準線（点線）を追加
-    fig_q.add_hline(
-        y=90,
-        line_dash="dash",
-        line_color="black",
-        annotation_text="Baseline E = 90",
-        annotation_position="top left",
-        annotation_font_size=12,
-        opacity=0.6
-    )
-
+    fig_q = px.bar(pd.DataFrame(bars), x="Scenario", y="E_total", text="S",
+                   color_discrete_sequence=["#888888"])
+    fig_q.update_traces(textposition="auto", insidetextfont_color="white", outsidetextfont_color="gray")
     st.plotly_chart(fig_q, use_container_width=True)
-        
-    ## Tornado plot
+
+    ## Tornado Sensitivity
     dark, light = "#333333", "#BBBBBB"
-    st.markdown(f"**{TXT['tornado_title']}**")
-    st.caption(TXT["tornado_hint"])
+    st.subheader(TXT['tornado_title'])
+    st.markdown(TXT["tornado_explain"])
+    params = {"a1":a1,"a2":a2,"a3":a3,"b0":b0,
+              "cross_ratio":cross_ratio,
+              "prep_ratio":prep_ratio,"Lunit":Lunit,
+              "T_total": T1 + T2 + T3}
+    name_map={"a1":"a1v","a2":"a2v","a3":"a3v",
+              "b0":"b0v","cross_ratio":"CRv",
+              "prep_ratio":"Pv","Lunit":"Lv",
+              "T_total": "Ttot"}
+    rows=[]
+    for k,v in params.items():
+        if k == "T_total":
+            base_T = T1 + T2 + T3
+            lo = max(base_T * 0.8, 0)
+            hi = base_T * 1.2
+            # For T_total, need to scale T1, T2, T3 proportionally
+            T_scaler_lo = lo / base_T if base_T > 0 else 0
+            T_scaler_hi = hi / base_T if base_T > 0 else 0
+            # Scale T1, T2, T3 and recalc E_total
+            _, _, _, _, E_var_lo = compute_metrics(
+                a1v=a1, a2v=a2, a3v=a3, b0v=b0,
+                CRv=cross_ratio, Pv=prep_ratio, Lv=Lunit
+            )
+            # Temporarily override T1, T2, T3 for lo
+            T1_lo = T1 * T_scaler_lo
+            T2_lo = T2 * T_scaler_lo
+            T3_lo = T3 * T_scaler_lo
+            Ttot_lo = (T1_lo + T2_lo + T3_lo) * qual_T * sched_T
+            Cx_lo = Ttot_lo * (1 + cross_ratio + prep_ratio)
+            Sx_lo = 1 - (1 - a1 * a2 * a3) * (1 - b0 * qual_B * sched_B)
+            C_lossx_lo = Cx_lo + Lunit * Cx_lo * (1 - Sx_lo)
+            E_var_lo = C_lossx_lo / Sx_lo
 
-    params = {
-        "a1": a1, "a2": a2, "a3": a3,
-        "b0": b0,
-        "cross_ratio": cross_ratio,
-        "prep_ratio": prep_ratio,
-        "Lunit": Lunit
-    }
-    name_map = {
-        "a1":"a1v","a2":"a2v","a3":"a3v",
-        "b0":"b0v","cross_ratio":"CRv",
-        "prep_ratio":"Pv","Lunit":"Lv"
-    }
+            T1_hi = T1 * T_scaler_hi
+            T2_hi = T2 * T_scaler_hi
+            T3_hi = T3 * T_scaler_hi
+            Ttot_hi = (T1_hi + T2_hi + T3_hi) * qual_T * sched_T
+            Cx_hi = Ttot_hi * (1 + cross_ratio + prep_ratio)
+            Sx_hi = 1 - (1 - a1 * a2 * a3) * (1 - b0 * qual_B * sched_B)
+            C_lossx_hi = Cx_hi + Lunit * Cx_hi * (1 - Sx_hi)
+            E_var_hi = C_lossx_hi / Sx_hi
 
-    rows = []
-    for k, v in params.items():
-        lo = max(v * 0.8, 0)
-        hi = min(v * 1.2, 1) if k in ("a1","a2","a3","b0") else v * 1.2
-        d_lo = abs(compute_E(**{name_map[k]: lo}) - E_total)
-        d_hi = abs(compute_E(**{name_map[k]: hi}) - E_total)
-        rows.append((k, max(d_lo, d_hi)))
-
-    df_t = pd.DataFrame(rows, columns=["param","delta"])\
-             .sort_values("delta", ascending=False)
-    maxd = df_t["delta"].max()
-    df_t["color"] = np.where(np.isclose(df_t["delta"], maxd, atol=1e-9), dark, light)
-
-    fig_t = px.bar(
-        df_t,
-        x="delta", y="param", orientation="h",
-        color="color",
-        color_discrete_map={dark:dark, light:light},
-        labels={"delta":"|ΔE|","param":""}
-    )
+            rel_delta_lo = abs(E_var_lo - E_totalx) / E_totalx * 100  # percent change
+            rel_delta_hi = abs(E_var_hi - E_totalx) / E_totalx * 100
+            rows.append((k, max(rel_delta_lo, rel_delta_hi)))
+            continue
+        lo=max(v*0.8,0)
+        hi= (min(v*1.2,1) if k in ("a1","a2","a3","b0") else v*1.2)
+        _, _, _, _, E_var_lo = compute_metrics(**{name_map[k]:lo})
+        _, _, _, _, E_var_hi = compute_metrics(**{name_map[k]:hi})
+        rel_delta_lo = abs(E_var_lo - E_totalx) / E_totalx * 100  # percent change
+        rel_delta_hi = abs(E_var_hi - E_totalx) / E_totalx * 100
+        rows.append((k, max(rel_delta_lo, rel_delta_hi)))
+    df_t=pd.DataFrame(rows, columns=["param","RelChange"])\
+           .sort_values("RelChange", ascending=False)
+    maxd=df_t["RelChange"].max()
+    df_t["color"]=np.where(df_t["RelChange"]==maxd, dark, light)
+    fig_t=px.bar(df_t, x="RelChange", y="param", orientation="h",
+                 color="color", color_discrete_map={dark:dark,light:light},
+                 labels={"RelChange":"|ΔE/E| (%)","param":""})
+    fig_t.update_traces(text=df_t["RelChange"].map("{:.1f}%".format), textposition="auto", insidetextfont_color="white", outsidetextfont_color="gray")
     fig_t.update_layout(showlegend=False,
                         yaxis=dict(categoryorder="total ascending"))
     st.plotly_chart(fig_t, use_container_width=True)
 
-    ## Slope plot
-    st.markdown(f"**{TXT['spider_title']}**")
-    st.caption(TXT["spider_hint"])
-
-    # 記号の定義（数値と区別するため _sym を付ける）
-    C_sym, S_sym, L_sym = sp.symbols("C S Lunit")
-
-    # 効率 E の式
-    E_sym = (C_sym + L_sym * (1 - S_sym)) / S_sym
-
-    # 偏微分（∂E/∂x）
-    dE_dL = sp.diff(E_sym, L_sym)
-    dE_dC = sp.diff(E_sym, C_sym)
-    dE_dS = sp.diff(E_sym, S_sym)
-
-    # 数値代入用辞書
-    subs_dict = {C_sym: C, S_sym: S, L_sym: Lunit}
-
-    # 効率値 E の数値化
-    E_val = float(E_sym.subs(subs_dict))
-
-    # 偏微分の数値評価
-    slope_L = float(dE_dL.subs(subs_dict))
-    slope_C = float(dE_dC.subs(subs_dict))
-    slope_S = float(dE_dS.subs(subs_dict))
-
-    # Elasticity（相対感度）評価
-    elast_L = slope_L * (Lunit / E_val)
-    elast_C = slope_C * (C / E_val)
-    elast_S = slope_S * (S / E_val)
-
-    # データフレーム化（2系列）
-    df = pd.DataFrame({
-        "Parameter": ["Loss unit ℓ", "Labor C", "Success S"],
-        "Partial (∂E/∂x)": [slope_L, slope_C, slope_S],
-        "Elasticity (∂E/∂x × x/E)": [elast_L, elast_C, elast_S],
+    # Symbolic elasticity-based relative sensitivities for C, S
+    rel_C = dE_dC * Cx / E_totalx
+    rel_S = dE_dS * Sx / E_totalx
+    rel_C_loss = dE_dC * C_lossx / E_totalx
+    rel_T = (rel_C + rel_C_loss) / 2  # 総工数TはCとC_totalの影響の中間と仮定
+    df_rel = pd.DataFrame({
+        "Parameter": [
+            "Success Rate S",
+            "Labor Cost C",
+            "Cost (w/ Loss)",
+            "Total Labor Time T"
+        ],
+        "Relative Sensitivity": [
+            abs(rel_S),
+            abs(rel_C),
+            abs(rel_C_loss),
+            abs(rel_T)
+        ]
     })
-
-    df_melt = df.melt(id_vars="Parameter", var_name="Type", value_name="Value")
-
-    # パラメータ名と値（横軸用）
-    params = ["Loss unit ℓ", "Labor C", "Success S"]
-    partials = [slope_L, slope_C, slope_S]
-    elasticities = [elast_L, elast_C, elast_S]
-
-    # サブプロット作成（上下2段・スペーサー拡大）
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_yaxes=True,
-        vertical_spacing=0.30,
-        subplot_titles=["Partial (∂E/∂x)", "Elasticity (∂E/∂x × x/E)"]
+    df_rel["Parameter"] = pd.Categorical(
+        df_rel["Parameter"],
+        categories=[
+            "Success Rate S",
+            "Labor Cost C",
+            "Cost (w/ Loss)",
+            "Total Labor Time T"
+        ],
+        ordered=True
     )
-
-    # 上段：Partial（∂E/∂x）
-    fig.add_trace(
-        go.Bar(
-            x=partials, y=params,
-            name="Partial", orientation="h",
-            marker_color="#888888",
-            text=[f"{v:.0f}" for v in partials],
-            textposition="outside",
-        ),
-        row=1, col=1
+    fig_rel = px.bar(df_rel, x="Relative Sensitivity", y="Parameter", orientation="h",
+                     text_auto=".2f", color_discrete_sequence=["#777777"])
+    fig_rel.update_traces(
+        texttemplate='%{text}',
+        text=df_rel["Relative Sensitivity"].map("{:.2f}".format),
+        insidetextfont_color="white",
+        outsidetextfont_color="gray"
     )
-
-    # 下段：Elasticity（相対感度）も灰色で統一
-    fig.add_trace(
-        go.Bar(
-            x=elasticities, y=params,
-            name="Elasticity", orientation="h",
-            marker_color="#888888",
-            text=[f"{v:.2f}" for v in elasticities],
-            textposition="outside",
-        ),
-        row=2, col=1
-    )
-
-    # レイアウト調整
-    fig.update_layout(
-        height=600,
+    fig_rel.update_layout(
         showlegend=False,
-        margin=dict(l=80, r=40, t=60, b=40),
+        yaxis=dict(categoryorder="array", categoryarray=["Success Rate S", "Labor Cost C"]),
+        xaxis_title="Relative Sensitivity (∂E/∂x × x/E)",
+        font=dict(size=14)
     )
-
-    # 軸ラベル設定
-    fig.update_xaxes(title_text="∂E/∂x", row=1, col=1)
-    fig.update_xaxes(title_text="∂E/∂x × x / E", row=2, col=1)
-    fig.update_yaxes(title_text=None)
-
-    # 表示
-    st.plotly_chart(fig, use_container_width=True)
 
 # ───────────────────────────────
-# Monte-Carlo Global Sensitivity
-if st.sidebar.checkbox("Run Monte-Carlo (100 000)"):
-    mc_var = st.sidebar.selectbox("MC variable", ["E_total","Success S"])
 
-    N, rng = 100_000, np.random.default_rng(0)
-    a1s = rng.normal(a1, 0.03, N).clip(0,1)
-    a2s = rng.normal(a2, 0.03, N).clip(0,1)
-    if a3 > 0:
-        a3s = rng.triangular(a3*0.9, a3, a3*1.1, N).clip(0,1)
-    else:
-        a3s = np.zeros(N)
+#
+#
+# Standardized Sensitivity (with Contribution %)
+# Reuse previously computed dE_dC, dE_dS, dE_dL and values from compute_metrics
+std_C = dE_dC * σC / σE
+std_S = dE_dS * σS / σE
+std_T = (std_C + abs(std_L)) / 2  # 総工数Tはコストと損失の中間として近似
+df_std = pd.DataFrame({
+    "Parameter": [
+        "Success Rate S",
+        "Labor Cost C",
+        "Cost (w/ Loss)",
+        "Total Labor Time T"
+    ],
+    "Std Sens": [
+        abs(std_S),
+        abs(std_C),
+        abs(std_L),
+        abs(std_T)
+    ]
+})
+df_std["Parameter"] = pd.Categorical(
+    df_std["Parameter"],
+    categories=[
+        "Success Rate S",
+        "Labor Cost C",
+        "Cost (w/ Loss)",
+        "Total Labor Time T"
+    ],
+    ordered=True
+)
+fig_std = px.bar(
+    df_std,
+    x="Std Sens",
+    y="Parameter",
+    orientation="h",
+    text=None,  # We'll set custom bar labels below
+    color_discrete_sequence=["#777777"],
+    labels={"Std Sens": "Standardized Sensitivity (ΔE/σ_E)", "Parameter": ""}
+)
+fig_std.update_traces(
+    texttemplate=None,
+    insidetextfont_color="white",
+    outsidetextfont_color="gray"
+)
+fig_std.update_layout(
+    showlegend=False,
+    yaxis=dict(categoryorder="array", categoryarray=["Success Rate S", "Labor Cost C"]),
+    xaxis_title="Standardized Sensitivity (ΔE/σ_E)",
+    font=dict(size=14),
+    margin=dict(r=120)
+)
+# Format bar labels with 3 decimal places for standardized sensitivity chart
+for trace in fig_std.data:
+    if hasattr(trace, "x") and hasattr(trace, "text"):
+        trace.text = [f"{v:.3f}" for v in trace.x]
+        trace.textposition = "auto"
 
-    if cross_ratio > 0:
-        CRs = rng.triangular(cross_ratio*0.8, cross_ratio, cross_ratio*1.2, N)
-    else:
-        CRs = np.zeros(N)
+# Display Relative and Standardized Sensitivity side by side
+sens_col1, sens_col2 = st.columns(2)
+with sens_col1:
+    st.subheader(TXT['spider_title'])
+    st.markdown(TXT["spider_explain"])
+    st.plotly_chart(fig_std, use_container_width=True)
+with sens_col2:
+    st.subheader(TXT['rel_title'])
+    st.markdown(TXT["rel_explain"])
+    st.plotly_chart(fig_rel, use_container_width=True)
 
-    if prep_ratio > 0:
-        PPs = rng.triangular(prep_ratio*0.8, prep_ratio, prep_ratio*1.2, N)
-    else:
-        PPs = np.zeros(N)
-
-    b0s = rng.uniform(0.70, 0.90, N).clip(0,1)
-    if Lunit > 0:
-        Ls = rng.triangular(Lunit*0.8, Lunit, Lunit*1.2, size=N)
-    else:
-        Ls = np.zeros(N)
-
-    Evals, Svals = [], []
-    for i in range(N):
-        a_tot = a1s[i]*a2s[i]*a3s[i]
-        b_e   = b0s[i]*qual_B*sched_B
-        S_i   = 1 - (1 - a_tot)*(1 - b_e)
-        C_i   = (T1+T2+T3)*qual_T*sched_T*(1+CRs[i]+PPs[i])
-        Evals.append((C_i+Ls[i]*C_i*(1-S_i))/S_i)
-        Svals.append(S_i)
-
-    data  = np.array(Evals if mc_var=="E_total" else Svals)
-    label = "E_total" if mc_var=="E_total" else "Success S"
-
-    mean   = data.mean()
-    median = np.median(data)
-    p5, p95= np.percentile(data, [5,95])
-    st.write("---")
-    st.subheader(TXT["mc_title"])
-    st.caption(TXT["mc_hint"])
-    st.markdown(f"**{mc_var}**")
-    st.metric("Mean",   f"{mean:.4f}")
-    st.metric("Median", f"{median:.4f}")
-    st.metric("5–95% CI", f"{p5:.4f} – {p95:.4f}")
-
-    fig_h = px.histogram(data, nbins=35, labels={"value":label})
-    fig_h.update_traces(marker_color="#888888")
-    fig_h.add_vline(x=mean,   line_dash="solid", line_color="#222222",
-                    annotation_text=f"Mean: {mean:.4f}",   annotation_position="top right")
-    fig_h.add_vline(x=median, line_dash="solid", line_color="#444444",
-                    annotation_text=f"Median: {median:.4f}", annotation_position="top left")
-    fig_h.add_vline(x=p5,     line_dash="dot",   line_color="#555555",
-                    annotation_text=f"5th pct: {p5:.4f}", annotation_position="bottom left")
-    fig_h.add_vline(x=p95,    line_dash="dot",   line_color="#555555",
-                    annotation_text=f"95th pct: {p95:.4f}", annotation_position="bottom right")
-    st.plotly_chart(fig_h, use_container_width=True)
+#
+# ───────────────────────────────
+# Monte Carlo Summary
+st.subheader(TXT['mc_title'])
+st.markdown(TXT["mc_explain"])
+mc_var = st.sidebar.selectbox(TXT["mc_variable"], ["E_total", "Success S"])
+data = Evals if mc_var=="E_total" else Svals
+p5,p95 = np.percentile(data,[5,95]); mean=data.mean(); med=np.median(data)
+decimals = ".2f" if mc_var == "E_total" else ".4f"
+st.metric("Mean",   format(mean, decimals))
+st.metric("Median", format(med, decimals))
+st.metric("5–95% CI", f"{format(p5, decimals)} – {format(p95, decimals)}")
+fig_h = px.histogram(data, nbins=35, labels={"value":mc_var})
+fig_h.update_traces(marker_color="#888888")
+fig_h.add_vline(x=mean, line_dash="solid", line_color="#222222",
+                annotation_text=f"Mean: {format(mean, decimals)}", annotation_position="top right")
+fig_h.add_vline(x=med,  line_dash="solid", line_color="#444444",
+                annotation_text=f"Median: {format(med, decimals)}", annotation_position="top left")
+fig_h.add_vline(x=p5,   line_dash="dot",   line_color="#555555",
+                annotation_text=f"5th pct: {format(p5, decimals)}", annotation_position="bottom left")
+fig_h.add_vline(x=p95,  line_dash="dot",   line_color="#555555",
+                annotation_text=f"95th pct: {format(p95, decimals)}", annotation_position="bottom right")
+st.plotly_chart(fig_h, use_container_width=True)
