@@ -1,40 +1,15 @@
-#!/usr/bin/env bash
-# ───────────────────────────────────────────────
-# One-stop launcher:  CLI + Streamlit GUI
-# ------------------------------------------------
+<file name=README.md>
+# CrossCheck Framework
 
-set -e
+## Command-Line Arguments
 
-# Parse first argument as MODE, default to "all"
-MODE="${1:-all}"
+- `--streamlit` — Launch the Streamlit dashboard
+- `--gerrit` — Run the Gerrit CLI script (prints a_hat / b_dir table)
 
-VENV=".venv"
-PYEXEC="python3"    # system python (3.9+ works fine)
+## Example Usage
 
-echo ">> Setting up virtual environment …"
-if [ ! -d "${VENV}" ]; then
-  ${PYEXEC} -m venv "${VENV}"
-  "${VENV}/bin/pip" install --upgrade pip
-  "${VENV}/bin/pip" install -r requirements.txt
-fi
-
-
-case "$MODE" in
-  gerrit)
-    echo ">> Running Gerrit CLI script (prints a_hat / b_dir table) …"
-    "${VENV}/bin/python" src/gerrit_ab_estimator_ratio_bazel.py
-    ;;
-  streamlit)
-    echo ">> Launching Streamlit dashboard …"
-    echo "   (Ctrl-C to stop, then deactivate the venv: 'deactivate')"
-    "${VENV}/bin/streamlit" run src/streamlit_app.py
-    ;;
-  *)
-    echo ">> Running Gerrit CLI script (prints a_hat / b_dir table) …"
-    "${VENV}/bin/python" src/gerrit_ab_estimator_ratio_bazel.py
-    echo ">> Launching Streamlit dashboard …"
-    echo "   (Ctrl-C to stop, then deactivate the venv: 'deactivate')"
-    "${VENV}/bin/streamlit" run src/streamlit_app.py
-    ;;
-esac
-
+```bash
+python src/main.py --streamlit
+python src/main.py --gerrit
+```
+</file>

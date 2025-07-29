@@ -15,6 +15,7 @@ It provides
 ./run.sh
 ```
 
+
 The script will
 
 - create .venv/ (if not present)
@@ -27,6 +28,53 @@ The script will
   - Unified layout and updated parameter names
 
 Tested on macOS 14 (Python 3.9) and Ubuntu 22.04 (Python 3.10).
+
+---
+
+### Command-Line Arguments (CLI)
+
+The CLI version accepts the following optional arguments:
+
+- `--streamlit` — Launch only the Streamlit app  
+- `--gerrit` — Run Gerrit-related CLI extraction only  
+- `--all` (default) — Run both CLI and Streamlit in one go  
+- `--lang en|ja` — Set language for CLI/Streamlit display  
+
+Examples:
+```bash
+python src/main.py --streamlit
+python src/main.py --gerrit --lang ja
+```
+
+---
+
+### Streamlit App Overview
+
+The Streamlit dashboard displays:
+
+- **Efficiency Metrics (E_total, C, S)** — per project or scenario
+- **Sensitivity Analysis**  
+  - Relative Sensitivity (`∂E/∂x × x/E`)
+  - Standardized Sensitivity (`∂E/∂x × σₓ / σ_E`)
+- **Tornado Diagrams** (±20% variation)
+- **Monte Carlo Simulation** with histogram and spider charts
+- **Language Toggle (EN/JA)** — upper-right language switch
+- **Scenario Filters** — quality/schedule grid (2×2), with visual comparison
+
+All graphs are consistently styled and labeled, with markdown hints in both languages.
+
+---
+
+### Gerrit Integration
+
+The CLI version automatically reads recent Gerrit logs (e.g. `data/sample_changes.json`) and:
+
+- extracts submission and review data
+- computes work vs review durations
+- exports summary metrics for visualization
+- serves as reproducible backend for the GUI
+
+To update the dataset, replace `data/sample_changes.json` with your own JSON export from Gerrit.
 
 ---
 
