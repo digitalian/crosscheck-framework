@@ -147,7 +147,7 @@ TXT_EN = {
         "Closs": "C_total (with loss)",
         "loss_unit": "Loss unit ℓ",
         "E_base": "Efficiency E (baseline)",
-        "E_total": "E_total (cost per success)",
+        "E_total": "E_total",
     },
     "charts": {
         "quality_schedule": {
@@ -167,7 +167,7 @@ TXT_EN = {
                 "Selected parameters (a₁, a₂, a₃, b₀, CR, PP, ℓ) are core drivers of success, effort, and loss.  \n"
                 "This helps identify which inputs most strongly affect cost-efficiency."
             ),
-            "xaxis": "|ΔE/E| (%)",
+            "xaxis": "|ΔE/E|",
         },
         "relative_sensitivity": {
             "title": "Relative Sensitivity",
@@ -221,7 +221,7 @@ TXT_JA = {
         "Closs": "C_total（損失込）",
         "loss_unit": "損失単価 ℓ",
         "E_base": "効率 E（ベースライン）",
-        "E_total": "E_total（成功1件あたりの総コスト）",
+        "E_total": "E_total",
     },
     "charts": {
         "quality_schedule": {
@@ -240,7 +240,7 @@ TXT_JA = {
                 "このグラフは主要パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）を±20%変化させたときのE_total（成功1件あたり総コスト）への影響を示します。  \n"
                 "どの入力がコスト効率に最も強く影響するかを可視化します。"
             ),
-            "xaxis": "|ΔE/E| (%)",
+            "xaxis": "|ΔE/E|",
         },
         "relative_sensitivity": {
             "title": "相対感度",
@@ -613,7 +613,6 @@ with right:
             "Parameter": ""
         }
     )
-    fig_t.update_traces(text=df_t["RelChange"].map("{:.1f}%".format), textposition="auto", insidetextfont_color="white", outsidetextfont_color="gray")
     fig_t.update_layout(showlegend=False,
                         yaxis=dict(categoryorder="total ascending"),
                         font=dict(size=14),
