@@ -146,7 +146,6 @@ TXT_EN = {
         "C": "Labor Cost C",
         "Closs": "C_total (with loss)",
         "loss_unit": "Loss unit ℓ",
-        "T": "Total time T",
         "E_base": "Efficiency E (baseline)",
         "E_total": "E_total (cost per success)",
     },
@@ -221,7 +220,6 @@ TXT_JA = {
         "C": "C（作業工数）",
         "Closs": "C_total（損失込）",
         "loss_unit": "損失単価 ℓ",
-        "T": "総作業時間 T",
         "E_base": "効率 E（ベースライン）",
         "E_total": "E_total（成功1件あたりの総コスト）",
     },
@@ -531,7 +529,6 @@ with right:
         "cross_ratio": params["cross_ratio"],
         "prep_post_ratio": params["prep_post_ratio"],
         "loss_unit": params["loss_unit"],
-        "T": params["T1"] + params["T2"] + params["T3"]
     }
     name_map = {
         "a1": "a1v",
@@ -544,29 +541,6 @@ with right:
     }
     rows=[]
     for k, v in params_for_sens.items():
-        if k == "T":
-            # For total labor time, vary T1/T2/T3 proportionally
-            base = params["T1"] + params["T2"] + params["T3"]
-            dT = base * 0.2
-            for label, base_val, lo_val, hi_val in [("T", base, base - dT, base + dT)]:
-                lo_T = lo_val * np.array([params["T1"], params["T2"], params["T3"]]) / base if base > 0 else np.array([0,0,0])
-                hi_T = hi_val * np.array([params["T1"], params["T2"], params["T3"]]) / base if base > 0 else np.array([0,0,0])
-                _, _, _, _, E_var_lo = compute_metrics(
-                    a1v=params["a1"], a2v=params["a2"], a3v=params["a3"], bv=params["b0"],
-                    cross_ratio_v=params["cross_ratio"], prep_post_ratio_v=params["prep_post_ratio"],
-                    loss_unit_v=params["loss_unit"], qualv=params["qual"], schedv=params["sched"],
-                    t1v=lo_T[0], t2v=lo_T[1], t3v=lo_T[2]
-                )
-                _, _, _, _, E_var_hi = compute_metrics(
-                    a1v=params["a1"], a2v=params["a2"], a3v=params["a3"], bv=params["b0"],
-                    cross_ratio_v=params["cross_ratio"], prep_post_ratio_v=params["prep_post_ratio"],
-                    loss_unit_v=params["loss_unit"], qualv=params["qual"], schedv=params["sched"],
-                    t1v=hi_T[0], t2v=hi_T[1], t3v=hi_T[2]
-                )
-                rel_delta_lo = abs(E_var_lo - E_total_x) / E_total_x * 100
-                rel_delta_hi = abs(E_var_hi - E_total_x) / E_total_x * 100
-                rows.append((k, max(rel_delta_lo, rel_delta_hi)))
-            continue
         lo = max(v * 0.8, 0)
         hi = (min(v * 1.2, 1) if k in ("a1", "a2", "a3", "b") else v * 1.2)
         # Build kwargs for compute_metrics, filling all required arguments
@@ -615,9 +589,6 @@ with right:
 
     # ───────────────────────────────
     # Compute elasticity-based relative and standardized sensitivities for E_total using unified config
-# Compute sensitivity only for loss unit ℓ
-# Compute sensitivity for ℓ, S, and T
-# 3つのパラメータ（ℓ, C, S）に対する感度を計算
     sens_config = [
         {
             "key": TXT["metrics"]["loss_unit"],
@@ -755,5 +726,3 @@ legend_label = {
     "ja": "凡例：平均値（実線）、中央値（実線）、信頼区間5–95%（点線）"
 }
 st.caption(legend_label["en"] if lang == "English" else legend_label["ja"])
-
-# Remove any remaining references to TXT["rel_xaxis"] or TXT["std_xaxis"]
