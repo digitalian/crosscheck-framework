@@ -145,6 +145,8 @@ TXT_EN = {
         "succ": "Success Rate S",
         "C": "Labor Cost C",
         "Closs": "C_total (with loss)",
+        "loss_unit": "Loss unit ℓ",
+        "T": "Total time T",
         "E_base": "Efficiency E (baseline)",
         "E_total": "E_total (cost per success)",
     },
@@ -159,7 +161,7 @@ TXT_EN = {
             ),
         },
         "tornado": {
-            "title": "Tornado Sensitivity (±20%)",
+            "title": "Tornado Sensitivity",
             "expander_title": "📘 Explanation: Impact of ±20% Parameter Changes",
             "expander_content": (
                 "This chart visualizes the effect of ±20% changes in key parameters on E_total (cost per success).  \n"
@@ -169,25 +171,20 @@ TXT_EN = {
             "xaxis": "|ΔE/E| (%)",
         },
         "relative_sensitivity": {
-            "title": "Relative Sensitivity (∂E/∂x × x/E)",
+            "title": "Relative Sensitivity",
             "xaxis": "Relative Sensitivity (∂E/∂x × x/E)",
             "expander_title": "📘 About Relative Sensitivity",
-            "expander_content": (
-                "This chart shows the elasticity of E_total with respect to each parameter, "
-                "representing the impact from a 1% input change.  \n"
-                "Relative sensitivity helps identify which parameters most affect cost efficiency in response to design or policy changes.  \n"
-                "Useful for prioritizing improvement efforts. Includes loss-adjusted cost (C_total) and approximated effect of total labor time (T), computed as the mean of sensitivities of C and C_total."
-            ),
+            "expander_content": """This chart displays the relative sensitivity of E_total (loss-adjusted cost per success) with respect to three independent parameters: loss unit ℓ, labor cost C, and success rate S.  
+It quantifies the elasticity (∂E/∂x × x/E) for each parameter, showing how a 1% proportional change impacts overall cost efficiency.  
+Use this analysis to prioritize which factor most improves cost efficiency when adjusted.""",
         },
         "standardized_sensitivity": {
-            "title": "Standardized Sensitivity (∂E/∂x × σₓ/σ_E)",
+            "title": "Standardized Sensitivity ",
             "xaxis": "Standardized Sensitivity (ΔE/σ_E)",
             "expander_title": "📘 About Standardized Sensitivity",
-            "expander_content": (
-                "This chart quantifies the influence of each parameter on E_total, normalized by its variability.  \n"
-                "Standardized sensitivity highlights how strongly each uncertain factor contributes to the variance of cost efficiency.  \n"
-                "Useful for uncertainty-based risk assessment. Includes loss-adjusted cost (C_total) and the approximated effect of total labor time (T), estimated as the midpoint of standardized sensitivities of cost and loss."
-            ),
+            "expander_content": """This chart shows the standardized sensitivity of E_total with respect to loss unit ℓ, labor cost C, and success rate S.  
+It normalizes each parameter’s partial derivative by its variability (∂E/∂x × σₓ/σ_E) to reveal which uncertainties contribute most to efficiency variance.  
+Use this analysis for risk assessment and uncertainty management.""",
         },
         "monte_carlo": {
             "title": "Monte Carlo Summary Statistics",
@@ -223,6 +220,8 @@ TXT_JA = {
         "succ": "成功率 S",
         "C": "C（作業工数）",
         "Closs": "C_total（損失込）",
+        "loss_unit": "損失単価 ℓ",
+        "T": "総作業時間 T",
         "E_base": "効率 E（ベースライン）",
         "E_total": "E_total（成功1件あたりの総コスト）",
     },
@@ -237,7 +236,7 @@ TXT_JA = {
             ),
         },
         "tornado": {
-            "title": "トルネード感度分析（±20%）",
+            "title": "トルネード感度分析",
             "expander_title": "📘 説明：パラメータ±20％変化の影響",
             "expander_content": (
                 "このグラフは主要パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）を±20%変化させたときのE_total（成功1件あたり総コスト）への影響を示します。  \n"
@@ -246,24 +245,18 @@ TXT_JA = {
             "xaxis": "|ΔE/E| (%)",
         },
         "relative_sensitivity": {
-            "title": "相対感度（∂E/∂x × x/E）",
+            "title": "相対感度",
             "xaxis": "相対感度（∂E/∂x × x/E）",
             "expander_title": "📘 相対感度グラフについて",
-            "expander_content": (
-                "各パラメータを1%変化させたときのE_total（総合コスト効率）の変化率（弾性値）を示します。  \n"
-                "設計や運用改善の優先度を考える上で、どの因子が効率に最も影響するか把握できます。  \n"
-                "損失込コスト（C_total）と、総労働時間（T）はCとC_totalの感度の平均で近似しています。"
-            ),
+            "expander_content": """互いに独立した各指標（損失単価ℓ、C（作業工数）、成功率S）が1%変化したときのE_total（総合コスト効率）の変化率（弾性値）を示します。  
+設計や運用改善の優先度を考える上で、どの因子が効率に最も影響するか把握できます。""",
         },
         "standardized_sensitivity": {
-            "title": "標準化感度（∂E/∂x × σₓ/σ_E）",
+            "title": "標準化感度",
             "xaxis": "標準化感度（ΔE/σ_E）",
             "expander_title": "📘 標準化感度グラフについて",
-            "expander_content": (
-                "各パラメータのばらつき（標準偏差）で正規化したE_totalへの影響度を示します。  \n"
-                "不確実性によるリスク評価や、どの因子の分散がコスト効率の不安定さに寄与しているかを把握できます。  \n"
-                "損失込コスト（C_total）と総労働時間（T）は、それぞれの標準化感度の中間値で近似しています。"
-            ),
+            "expander_content": """互いに独立した各指標（損失単価ℓ、C（作業工数）、成功率S）のばらつき（標準偏差）で正規化したE_totalへの影響度を示します。  
+不確実性によるリスク評価や、どの因子の分散がコスト効率の不安定さに寄与しているかを把握できます。""",
         },
         "monte_carlo": {
             "title": "モンテカルロ要約統計",
@@ -378,10 +371,10 @@ def run_mc(params: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np
     a2s = rng.normal(params["a2"], 0.03, N).clip(0, 1)
     a3s = rng.triangular(params["a3"]*0.9, params["a3"], params["a3"]*1.1, N).clip(0,1)
     b0s = rng.uniform(0.70, 0.90, N).clip(0,1)
-    # Time distributions
-    t1s = rng.normal(params["T1"], 0.5, N).clip(min=1)
-    t2s = rng.normal(params["T2"], 0.5, N).clip(min=1)
-    t3s = rng.normal(params["T3"], 0.5, N).clip(min=1)
+    # Time distributions (10% variability for T1-T3)
+    t1s = rng.normal(params["T1"], params["T1"] * 0.1, N).clip(min=1)
+    t2s = rng.normal(params["T2"], params["T2"] * 0.1, N).clip(min=1)
+    t3s = rng.normal(params["T3"], params["T3"] * 0.1, N).clip(min=1)
     cross_ratios = (
         rng.triangular(params["cross_ratio"]*0.8, params["cross_ratio"], params["cross_ratio"]*1.2, N)
         if params["cross_ratio"] > 0 else np.zeros(N)
@@ -400,8 +393,9 @@ def run_mc(params: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np
     sched_T, sched_B = (1,1) if params["sched"]=="OnTime" else (2/3,0.8)
     b_eff = b0s * qual_B * sched_B
     Svals = 1 - (1 - a_tot) * (1 - b_eff)
-    T = (params["T1"] + params["T2"] + params["T3"]) * qual_T * sched_T
-    Cvals = T * (1 + cross_ratios + prep_post_ratios)
+    # Use sampled times for cost calculation
+    Tvals = (t1s + t2s + t3s) * qual_T * sched_T
+    Cvals = Tvals * (1 + cross_ratios + prep_post_ratios)
     Evals = (Cvals + loss_units * Cvals * (1 - Svals)) / Svals
     return Evals, Svals, Cvals
 
@@ -430,6 +424,13 @@ if params["loss_unit"] > 0:
 else:
     mc_loss_units = np.zeros(sample_n)
 σL = np.std(mc_loss_units)
+
+# Compute C_loss_vals for standardized sensitivity using actual C_loss distribution
+if params["loss_unit"] > 0:
+    C_loss_vals = Cvals + mc_loss_units * Cvals * (1 - Svals)
+else:
+    C_loss_vals = Cvals
+σ_Closs = np.std(C_loss_vals)
 
 # ───────────────────────────────
 # Symbolic derivatives utility function
@@ -614,36 +615,26 @@ with right:
 
     # ───────────────────────────────
     # Compute elasticity-based relative and standardized sensitivities for E_total using unified config
+# Compute sensitivity only for loss unit ℓ
+# Compute sensitivity for ℓ, S, and T
+# 3つのパラメータ（ℓ, C, S）に対する感度を計算
     sens_config = [
         {
-            "key": TXT["metrics"]["succ"],
-            "rel_val": dE_dS * S_x / E_total_x,
-            "std_val": dE_dS * σS / σE
-        },
-        {
-            "key": TXT["metrics"]["C"],
-            "rel_val": dE_dC * C_x / E_total_x,
-            "std_val": dE_dC * σC / σE
-        },
-        {
-            "key": TXT["metrics"]["Closs"],
-            "rel_val": dE_dC * C_loss_x / E_total_x,
+            "key": TXT["metrics"]["loss_unit"],
+            "rel_val": dE_dL * loss_unit / E_total_x,   # ℓ の弾性
             "std_val": dE_dL * σL / σE
         },
         {
-            "key": "T",
-            # For T, rel_val and std_val are averaged as in previous logic
-            "rel_val": None,
-            "std_val": None
+            "key": TXT["metrics"]["C"],
+            "rel_val": dE_dC * C_x / E_total_x,         # C の弾性
+            "std_val": dE_dC * σC / σE
+        },
+        {
+            "key": TXT["metrics"]["succ"],
+            "rel_val": dE_dS * S_x / E_total_x,         # S の弾性
+            "std_val": dE_dS * σS / σE
         }
     ]
-    # Fill in T's rel_val and std_val as the mean of C and Closs sensitivities
-    sens_config[3]["rel_val"] = (
-        (sens_config[1]["rel_val"] + sens_config[2]["rel_val"]) / 2
-    )
-    sens_config[3]["std_val"] = (
-        (abs(sens_config[1]["std_val"]) + abs(sens_config[2]["std_val"])) / 2
-    )
     order = [d["key"] for d in sens_config]
     df_rel = pd.DataFrame({
         "Parameter": [d["key"] for d in sens_config],
