@@ -38,7 +38,6 @@ The CLI version accepts the following optional arguments:
 - `--streamlit` — Launch only the Streamlit app  
 - `--gerrit` — Run Gerrit-related CLI extraction only  
 - `--all` (default) — Run both CLI and Streamlit in one go  
-- `--lang en|ja` — Set language for CLI/Streamlit display  
 
 Examples:
 ```bash
