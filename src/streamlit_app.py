@@ -1,33 +1,44 @@
 # ──────────────────────────────────────────────────────────────
 #  Cross‑Check Framework  •  Streamlit Simulation App
+#  v2025‑07‑29  –  Sobol global sensitivity & PCG64DXSM RNG
 # ──────────────────────────────────────────────────────────────
 #  (c) 2025 digitalian  –  MIT License
 # ----------------------------------------------------------------
-#  Major fixes
-#   • BUG‑1: partial derivative dE/dℓ – missing cost factor C
-#   • BUG‑4: σℓ and C_loss distribution – must include C·ℓ term
+#  Changelog
+#   • NEW  : Sobol first‑order/global sensitivity chart (SALib)
+#   • NEW  : PCG64DXSM BitGenerator for faster, robust RNG
+#   • FIX  : BUG‑1, BUG‑4  (see previous commits)
 # ----------------------------------------------------------------
 
 from __future__ import annotations
 
 import streamlit as st
-import numpy as np
+import numpy as np, math
 import sympy as sp
 import pandas as pd
 import plotly.express as px
-from typing import Tuple, Dict
+from typing import Tuple, Dict, List
 
-# ══════════════════════════════════════════════════════════════
-#  Localisation helpers
-# ══════════════════════════════════════════════════════════════
+# ── New: SALib for Sobol ────────────────────────────────────────
+try:
+    # SALib ≥1.5 推奨ルート
+    from SALib.sample.sobol import sample as sobol_sample
+except ImportError:          # SALib ≤1.4 fallback
+    from SALib.sample import saltelli as sobol_sample
+from SALib.analyze import sobol
+
+# ── New: PCG64DXSM generator (faster & parallel‑safe) ──────────
+from numpy.random import PCG64DXSM, Generator
+
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 1  •  Helper utilities
+# ╚══════════════════════════════════════════════════════════════╝
 def get_text_labels(lang: str) -> Dict:
+    """Return language‑specific label dictionary."""
     LANG = "EN" if lang == "English" else "JA"
     return TXT_ALL[LANG]
 
 
-# ══════════════════════════════════════════════════════════════
-#  Streamlit Session‑State helpers
-# ══════════════════════════════════════════════════════════════
 def get_state(key, default):
     """Retrieve or initialise a value in `st.session_state`."""
     if key not in st.session_state:
@@ -37,26 +48,23 @@ def get_state(key, default):
 
 def exp(path: str):
     """
-    Create an expander from nested TXT dict using a dot‑separated
-    key path (e.g. 'charts.tornado.expander_title').
+    Create an expander from nested TXT dict using a dot‑separated key path.
+    Example: 'charts.tornado.expander_title'
     """
     keys = path.split(".")
     title = TXT
     for k in keys:
         title = title[k]
-
     content_keys = keys[:-1] + [keys[-1].replace("_title", "_content")]
     content = TXT
     for k in content_keys:
         content = content[k]
-
     with st.expander(title, expanded=False):
         st.markdown(content)
 
-
-# ══════════════════════════════════════════════════════════════
-#  Core deterministic calculation
-# ══════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 2  •  Core deterministic model
+# ╚══════════════════════════════════════════════════════════════╝
 def compute_metrics(
     a1v: float,
     a2v: float,
@@ -71,69 +79,38 @@ def compute_metrics(
     t2v: float,
     t3v: float,
 ) -> Tuple[float, float, float, float, float]:
-    """
-    Return (S, C, C_loss, E, E_total) for the given parameter set.
+    """Return S, C, C_loss, E, E_total for a single scenario."""
+    # Multipliers
+    qual_T, qual_B = (1, 1) if qualv == "Standard" else (2 / 3, 0.8)
+    sched_T, sched_B = (1, 1) if schedv == "OnTime" else (2 / 3, 0.8)
 
-    S         – overall success rate
-    C         – labour cost
-    C_loss    – loss‑adjusted cost
-    E         – efficiency (C / S)
-    E_total   – total efficiency (C_loss / S)
-    """
-    # Scenario‑specific multipliers
-    qual_T, qual_B = (1, 1)
-    sched_T, sched_B = (1, 1)
-    if qualv == "Low":
-        qual_T, qual_B = (2 / 3, 0.8)
-    if schedv == "Late":
-        sched_T, sched_B = (2 / 3, 0.8)
-
-    # Success probabilities
+    # Success probability
     a_tot = a1v * a2v * a3v
     b_eff = bv * qual_B * sched_B
     S_x = 1 - (1 - a_tot) * (1 - b_eff)
 
-    # Cost components
+    # Costs
     T = (t1v + t2v + t3v) * qual_T * sched_T
     C_x = T * (1 + cross_ratio_v + prep_post_ratio_v)
     C_loss_x = C_x + loss_unit_v * C_x * (1 - S_x)
 
-    # Efficiency metrics
+    # Efficiencies
     E_x = C_x / S_x
     E_total_x = C_loss_x / S_x
-
     return S_x, C_x, C_loss_x, E_x, E_total_x
 
 
-# ══════════════════════════════════════════════════════════════
-#  Sensitivity bar‑plot helper
-# ══════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 3  •  Sensitivity‑plot helper
+# ╚══════════════════════════════════════════════════════════════╝
 def make_sensitivity_bar(
-    df: pd.DataFrame,
-    value_col: str,
-    tick_fmt: str = "{:.2f}",
-    order=None,
+    df: pd.DataFrame, value_col: str, tick_fmt: str = "{:.2f}", order=None
 ):
-    """
-    Return a horizontal bar chart (Plotly) for sensitivities.
-    The DataFrame must have 'Parameter' and `value_col`.
-    """
+    """Horizontal bar (Plotly) for sensitivity tables."""
     df = df.copy()
     df[value_col] = df[value_col].abs()
-
-    # Axis and colour settings
-    if "rel" in value_col.lower():
-        xaxis_label = TXT["charts"]["relative_sensitivity"]["xaxis"]
-    elif "std" in value_col.lower():
-        xaxis_label = TXT["charts"]["standardized_sensitivity"]["xaxis"]
-    else:
-        xaxis_label = value_col
-
     if order:
-        df["Parameter"] = pd.Categorical(
-            df["Parameter"], categories=order, ordered=True
-        )
-
+        df["Parameter"] = pd.Categorical(df["Parameter"], categories=order, ordered=True)
     fig = px.bar(
         df,
         x=value_col,
@@ -141,7 +118,6 @@ def make_sensitivity_bar(
         orientation="h",
         text=df[value_col].map(tick_fmt.format),
         color_discrete_sequence=["#000000"],
-        labels={value_col: xaxis_label, "Parameter": ""},
     )
     fig.update_traces(
         texttemplate="%{text}",
@@ -151,7 +127,6 @@ def make_sensitivity_bar(
     fig.update_layout(
         showlegend=False,
         yaxis=dict(categoryorder="array", categoryarray=order) if order else {},
-        xaxis_title=xaxis_label,
         font=dict(size=14),
         bargap=0.1,
         margin=dict(t=30, b=40),
@@ -159,23 +134,17 @@ def make_sensitivity_bar(
     return fig
 
 
-# ══════════════════════════════════════════════════════════════
-#  Streamlit – page‑wide config
-# ══════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 4  •  Streamlit‑wide config & localisation strings
+# ╚══════════════════════════════════════════════════════════════╝
 st.set_page_config(page_title="Cross‑Check Simulator", layout="wide")
 
 if "lang" not in st.session_state:
     st.session_state.lang = "English"
-lang = st.sidebar.radio(
-    "Language / 言語", ["English", "日本語"], index=0, key="lang", horizontal=True
-)
+lang = st.sidebar.radio("Language / 言語", ["English", "日本語"], index=0, key="lang", horizontal=True)
 
-# ══════════════════════════════════════════════════════════════
-#  Localised strings (TXT) – abbreviated here for brevity
-#  ...  (the content of TXT_EN and TXT_JA remains unchanged)
-# ══════════════════════════════════════════════════════════════
-#  ↓↓↓  TXT_EN and TXT_JA dicts  ↓↓↓
-#  (omitted – identical to original except minor typo fixes)
+# --- Localisation dictionaries (EN & JA) ---
+#   *Sobol 部分の新ラベルを追記*
 TXT_EN = {
     "panel": {
         "input": "INPUT PANEL",
@@ -209,6 +178,16 @@ TXT_EN = {
                 "This helps identify which inputs most strongly affect cost-efficiency."
             ),
             "xaxis": "|ΔE/E|",
+        },
+        "sobol": {
+            "title": "Global Sensitivity (Sobol S₁)",
+            "expander_title": "📘 Sobol Global Sensitivity",
+            "expander_content": (
+                "Variance‑based global sensitivity analysis using Saltelli sampling (N×(k+2) runs). "
+                "Bars show the first‑order Sobol index S₁ for each parameter; "
+                "higher values = greater contribution to output variance."
+            ),
+            "xaxis": "Sobol S₁",
         },
         "relative_sensitivity": {
             "title": "Relative Sensitivity",
@@ -283,6 +262,15 @@ TXT_JA = {
             ),
             "xaxis": "|ΔE/E|",
         },
+        "sobol": {
+            "title": "グローバル感度 (Sobol S₁)",
+            "expander_title": "📘 Sobol グローバル感度",
+            "expander_content": (
+                "Saltelli サンプリングによる Sobol 一次指数 (S₁)。"
+                "E_total の分散に対する各パラメータの寄与度を示します。"
+            ),
+            "xaxis": "Sobol S₁",
+        },
         "relative_sensitivity": {
             "title": "相対感度",
             "xaxis": "相対感度（∂E/∂x × x/E）",
@@ -324,66 +312,44 @@ TXT_JA = {
 TXT_ALL = {"EN": TXT_EN, "JA": TXT_JA}
 TXT = get_text_labels(lang)
 
-# ══════════════════════════════════════════════════════════════
-#  Sidebar – input controls
-# ══════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 5  •  Sidebar inputs
+# ╚══════════════════════════════════════════════════════════════╝
 def get_sidebar_params() -> Dict[str, float]:
     st.sidebar.title(TXT["panel"]["input"])
-
-    # 1) Step success rates
-    a1 = st.sidebar.slider("a1 (step 1 success)", 0.5, 1.0, get_state("a1", 0.95), 0.01)
-    a2 = st.sidebar.slider("a2 (step 2 success)", 0.5, 1.0, get_state("a2", 0.95), 0.01)
-    a3 = st.sidebar.slider("a3 (step 3 success)", 0.5, 1.0, get_state("a3", 0.80), 0.01)
-
+    # 1) Success rates
+    a1 = st.sidebar.slider("a1 (step 1)", 0.5, 1.0, get_state("a1", 0.95), 0.01)
+    a2 = st.sidebar.slider("a2 (step 2)", 0.5, 1.0, get_state("a2", 0.95), 0.01)
+    a3 = st.sidebar.slider("a3 (step 3)", 0.5, 1.0, get_state("a3", 0.80), 0.01)
     # 2) Task times
     col_t1, col_t2, col_t3 = st.sidebar.columns(3)
     with col_t1:
-        T1 = st.number_input("T1 [h]", 0, 200, get_state("T1", 10), key="T1")
+        T1 = st.number_input("T1 [h]", 0, 200, get_state("T1", 10), key="T1")
     with col_t2:
-        T2 = st.number_input("T2 [h]", 0, 200, get_state("T2", 10), key="T2")
+        T2 = st.number_input("T2 [h]", 0, 200, get_state("T2", 10), key="T2")
     with col_t3:
-        T3 = st.number_input("T3 [h]", 0, 200, get_state("T3", 30), key="T3")
-
+        T3 = st.number_input("T3 [h]", 0, 200, get_state("T3", 30), key="T3")
     # 3) Quality & Schedule
     col_q, col_s = st.sidebar.columns(2)
     with col_q:
-        qual = st.selectbox(
-            "Quality", ["Standard", "Low"], 0 if get_state("qual", "Standard") == "Standard" else 1, key="qual"
-        )
+        qual = st.selectbox("Quality", ["Standard", "Low"], index=0 if get_state("qual", "Standard") == "Standard" else 1, key="qual")
     with col_s:
-        sched = st.selectbox(
-            "Schedule", ["OnTime", "Late"], 0 if get_state("sched", "OnTime") == "OnTime" else 1, key="sched"
-        )
-
+        sched = st.selectbox("Schedule", ["OnTime", "Late"], index=0 if get_state("sched", "OnTime") == "OnTime" else 1, key="sched")
+    # 4) Checker
     st.sidebar.markdown("---")
-
-    # 4) Checker effectiveness
-    b0 = st.sidebar.slider("b0 (checker success)", 0.0, 1.0, get_state("b0", 0.80), 0.01)
-
+    b0 = st.sidebar.slider("b0 (checker)", 0.0, 1.0, get_state("b0", 0.80), 0.01)
     # 5) Cost ratios
-    cross_ratio = st.sidebar.slider(
-        "Cross‑ratio", 0.0, 0.5, get_state("cross_ratio", 0.30), 0.01
-    )
-    prep_post_ratio = st.sidebar.slider(
-        "Prep/Post ratio", 0.0, 0.5, get_state("prep_post_ratio", 0.40), 0.01
-    )
-
-    st.sidebar.markdown("---")
-
+    cross_ratio = st.sidebar.slider("Cross‑ratio", 0.0, 0.5, get_state("cross_ratio", 0.30), 0.01)
+    prep_post_ratio = st.sidebar.slider("Prep/Post ratio", 0.0, 0.5, get_state("prep_post_ratio", 0.40), 0.01)
     # 6) Loss unit
-    loss_unit = st.sidebar.slider(
-        "Loss unit ℓ", 0.0, 50.0, get_state("loss_unit", 0.0), 0.1
-    )
-
-    # 7) Monte Carlo parameters
+    st.sidebar.markdown("---")
+    loss_unit = st.sidebar.slider("Loss unit ℓ", 0.0, 50.0, get_state("loss_unit", 0.0), 0.1)
+    # 7) Monte Carlo
     st.sidebar.markdown("<hr style='border-top:3px solid black'>", unsafe_allow_html=True)
     st.sidebar.title("Monte‑Carlo")
-
     col_n, col_var = st.sidebar.columns(2)
     with col_n:
-        sample_n = st.number_input(
-            "Samples", 1_000, 1_000_000, get_state("sample_n", 100_000), step=10_000
-        )
+        sample_n = st.number_input("Samples", 1_000, 1_000_000, get_state("sample_n", 100_000), step=10_000)
     with col_var:
         mc_var = st.selectbox("MC variable", ["E_total", "Success S"], 0, key="mc_var")
 
@@ -404,36 +370,17 @@ def get_sidebar_params() -> Dict[str, float]:
         mc_var=mc_var,
     )
 
-
-# Retrieve sidebar inputs
 params = get_sidebar_params()
 
-# ══════════════════════════════════════════════════════════════
-#  Baseline deterministic results
-# ══════════════════════════════════════════════════════════════
-qual_T, qual_B = (1, 1) if params["qual"] == "Standard" else (2 / 3, 0.8)
-sched_T, sched_B = (1, 1) if params["sched"] == "OnTime" else (2 / 3, 0.8)
-
-a_total = params["a1"] * params["a2"] * params["a3"]
-b_eff = params["b0"] * qual_B * sched_B
-S = 1 - (1 - a_total) * (1 - b_eff)
-
-T = (params["T1"] + params["T2"] + params["T3"]) * qual_T * sched_T
-C = T * (1 + params["cross_ratio"] + params["prep_post_ratio"])
-C_loss = C + params["loss_unit"] * C * (1 - S)
-
-E = C / S
-E_total = C_loss / S
-
-# ══════════════════════════════════════════════════════════════
-#  Monte‑Carlo simulation (vectorised)
-# ══════════════════════════════════════════════════════════════
-@st.cache_data(show_spinner=False)
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 6  •  Monte‑Carlo simulation  (PCG64DXSM)
+# ╚══════════════════════════════════════════════════════════════╝
+@st.cache_data(show_spinner=False, ttl=900)
 def run_mc(p: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (Evals, Svals, Cvals, L_samples) arrays."""
-    rng = np.random.default_rng(0)
+    """Vectorised Monte‑Carlo returning Evals, Svals, Cvals, L_samples."""
+    rng = Generator(PCG64DXSM(seed=0))
 
-    # Success parameters
+    # Success params
     a1s = rng.normal(p["a1"], 0.03, N).clip(0, 1)
     a2s = rng.normal(p["a2"], 0.03, N).clip(0, 1)
     a3s = rng.triangular(p["a3"] * 0.9, p["a3"], p["a3"] * 1.1, N).clip(0, 1)
@@ -445,65 +392,96 @@ def run_mc(p: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np.ndar
     t3s = rng.normal(p["T3"], p["T3"] * 0.1, N).clip(min=1)
 
     # Cost ratios
-    cross_ratios = (
-        rng.triangular(p["cross_ratio"] * 0.8, p["cross_ratio"], p["cross_ratio"] * 1.2, N)
-        if p["cross_ratio"] > 0 else np.zeros(N)
-    )
-    prep_post_ratios = (
-        rng.triangular(p["prep_post_ratio"] * 0.8, p["prep_post_ratio"], p["prep_post_ratio"] * 1.2, N)
-        if p["prep_post_ratio"] > 0 else np.zeros(N)
-    )
-
-    # Loss unit ℓ
-    L_samples = (
-        rng.triangular(p["loss_unit"] * 0.8, p["loss_unit"], p["loss_unit"] * 1.2, N)
-        if p["loss_unit"] > 0 else np.zeros(N)
-    )
+    cross_ratios = rng.triangular(p["cross_ratio"] * 0.8, p["cross_ratio"], p["cross_ratio"] * 1.2, N) if p["cross_ratio"] > 0 else np.zeros(N)
+    prep_post_ratios = rng.triangular(p["prep_post_ratio"] * 0.8, p["prep_post_ratio"], p["prep_post_ratio"] * 1.2, N) if p["prep_post_ratio"] > 0 else np.zeros(N)
+    L_samples = rng.triangular(p["loss_unit"] * 0.8, p["loss_unit"], p["loss_unit"] * 1.2, N) if p["loss_unit"] > 0 else np.zeros(N)
 
     # Multipliers
     qual_T, qual_B = (1, 1) if p["qual"] == "Standard" else (2 / 3, 0.8)
     sched_T, sched_B = (1, 1) if p["sched"] == "OnTime" else (2 / 3, 0.8)
 
-    # Vectorised calculations
     a_tot = a1s * a2s * a3s
     b_eff = b0s * qual_B * sched_B
     Svals = 1 - (1 - a_tot) * (1 - b_eff)
 
     Tvals = (t1s + t2s + t3s) * qual_T * sched_T
     Cvals = Tvals * (1 + cross_ratios + prep_post_ratios)
-
     Evals = (Cvals + L_samples * Cvals * (1 - Svals)) / Svals
     return Evals, Svals, Cvals, L_samples
 
 
 Evals, Svals, Cvals, L_samples = run_mc(params, int(params["sample_n"]))
 
-#  Standard deviations (for standardised sensitivities)
-σE = Evals.std()
-σC = Cvals.std()
-σS = Svals.std()
+# Std‑devs
+σE, σC, σS, σL = Evals.std(), Cvals.std(), Svals.std(), (Cvals * L_samples).std()
 
-#  ---  FIX #4  -------------------------------------------------
-#      σℓ must correspond to distribution of (C · ℓ)
-# --------------------------------------------------------------
-σL = (Cvals * L_samples).std()
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 7  •  Sobol global sensitivity  (PCG64DXSM)
+# ╚══════════════════════════════════════════════════════════════╝
+@st.cache_data(show_spinner=False, ttl=900)
+def run_sobol(p: Dict[str, float], N: int = 10_000) -> pd.DataFrame:
+    """Return DataFrame with first‑order Sobol indices."""
+    # Problem definition
+    problem = {
+        "num_vars": 7,
+        "names": ["a1", "a2", "a3", "b0", "CR", "PP", "L"],
+        "bounds": [
+            [0.5, 1.0],
+            [0.5, 1.0],
+            [0.5, 1.0],
+            [0.0, 1.0],
+            [0.0, 0.5],
+            [0.0, 0.5],
+            [0.0, 50.0],
+        ],
+    }
+    # SALib ≤1.5: seed 引数は非対応。NumPy にシード固定で再現性を担保
+    np.random.seed(0)
+    # パッチ②: N を 2^n に丸める
+    N_pow2 = 2 ** math.ceil(math.log2(N))
+    if N_pow2 != N:
+        st.info(f"Sobol sample数を {N} → {N_pow2} に調整（2^n 必須）")
+    X = sobol_sample(problem, N_pow2, calc_second_order=False)
+    # Vectorised model: compute E_total for each row
+    qual_T, qual_B = (1, 1) if p["qual"] == "Standard" else (2 / 3, 0.8)
+    sched_T, sched_B = (1, 1) if p["sched"] == "OnTime" else (2 / 3, 0.8)
 
-#  Loss‑adjusted cost distribution (for completeness)
-C_loss_vals = Cvals + (Cvals * L_samples) * (1 - Svals)
-σ_Closs = C_loss_vals.std()
+    a_tot = X[:, 0] * X[:, 1] * X[:, 2]
+    b_eff = X[:, 3] * qual_B * sched_B
+    Sarr = 1 - (1 - a_tot) * (1 - b_eff)
 
-# ══════════════════════════════════════════════════════════════
-#  Symbolic partial derivatives (elasticities)
-# ══════════════════════════════════════════════════════════════
+    # Costs
+    T_base = (p["T1"] + p["T2"] + p["T3"]) * qual_T * sched_T  # keep times constant
+    C_base = T_base * (1 + X[:, 4] + X[:, 5])
+    E_total_arr = (C_base + X[:, 6] * C_base * (1 - Sarr)) / Sarr
+
+    Si = sobol.analyze(problem, E_total_arr, calc_second_order=False, print_to_console=False)
+    df = pd.DataFrame({"Parameter": problem["names"], "S1": Si["S1"], "ST": Si["ST"]})
+    return df.sort_values("S1", ascending=False)
+
+
+df_sobol = run_sobol(params)
+
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 8  •  Deterministic baseline computation
+# ╚══════════════════════════════════════════════════════════════╝
+qual_T, qual_B = (1, 1) if params["qual"] == "Standard" else (2 / 3, 0.8)
+sched_T, sched_B = (1, 1) if params["sched"] == "OnTime" else (2 / 3, 0.8)
+a_total = params["a1"] * params["a2"] * params["a3"]
+b_eff = params["b0"] * qual_B * sched_B
+S = 1 - (1 - a_total) * (1 - b_eff)
+T = (params["T1"] + params["T2"] + params["T3"]) * qual_T * sched_T
+C = T * (1 + params["cross_ratio"] + params["prep_post_ratio"])
+C_loss = C + params["loss_unit"] * C * (1 - S)
+E = C / S
+E_total = C_loss / S
+
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 9  •  Relative & standardized local elasticities
+# ╚══════════════════════════════════════════════════════════════╝
 def symbolic_derivatives(C_: float, S_: float, L_: float) -> Dict[str, float]:
-    """Return partial derivatives of E wrt C, S, L."""
     C_sym, S_sym, L_sym = sp.symbols("C S L")
-
-    #  ---  FIX #1  -------------------------------------------------
-    #  Missing cost factor C in loss term
-    # --------------------------------------------------------------
     E_expr = (C_sym + C_sym * L_sym * (1 - S_sym)) / S_sym
-
     return {
         "dE_dC": float(sp.diff(E_expr, C_sym).subs({C_sym: C_, S_sym: S_, L_sym: L_})),
         "dE_dS": float(sp.diff(E_expr, S_sym).subs({C_sym: C_, S_sym: S_, L_sym: L_})),
@@ -511,168 +489,130 @@ def symbolic_derivatives(C_: float, S_: float, L_: float) -> Dict[str, float]:
     }
 
 
-sym_derivs = symbolic_derivatives(C, S, params["loss_unit"])
-dE_dC = sym_derivs["dE_dC"]
-dE_dS = sym_derivs["dE_dS"]
-dE_dL = sym_derivs["dE_dL"]
+derivs = symbolic_derivatives(C, S, params["loss_unit"])
+rel_C = derivs["dE_dC"] * C / E_total
+rel_S = derivs["dE_dS"] * S / E_total
+rel_L = derivs["dE_dL"] * params["loss_unit"] / E_total
+std_C = derivs["dE_dC"] * σC / σE
+std_S = derivs["dE_dS"] * σS / σE
+std_L = derivs["dE_dL"] * σL / σE
 
-#  Elasticities (relative sensitivities)
-rel_C = dE_dC * C / E_total
-rel_S = dE_dS * S / E_total
-rel_L = dE_dL * params["loss_unit"] / E_total
-
-#  Standardised sensitivities
-std_C = dE_dC * σC / σE
-std_S = dE_dS * σS / σE
-std_L = dE_dL * σL / σE
-
-# ══════════════════════════════════════════════════════════════
-#  UI – output metrics & charts
-# ══════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════╗
+#  Section 10  •  UI layout
+# ╚══════════════════════════════════════════════════════════════╝
 left, right = st.columns([1, 2])
-
 with left:
     st.subheader(TXT["panel"]["output"])
-
     st.metric(TXT["metrics"]["a_total"], f"{a_total:.4f}")
-    S_x, C_x, C_loss_x, E_x, E_total_x = compute_metrics(
-        a1v=params["a1"],
-        a2v=params["a2"],
-        a3v=params["a3"],
-        bv=params["b0"],
-        cross_ratio_v=params["cross_ratio"],
-        prep_post_ratio_v=params["prep_post_ratio"],
-        loss_unit_v=params["loss_unit"],
-        qualv=params["qual"],
-        schedv=params["sched"],
-        t1v=params["T1"],
-        t2v=params["T2"],
-        t3v=params["T3"],
-    )
-    st.metric(TXT["metrics"]["succ"], f"{S_x:.2%}")
-    st.metric(TXT["metrics"]["C"], f"{C_x:.1f}")
-    st.metric(TXT["metrics"]["Closs"], f"{C_loss_x:.1f}")
-    st.metric(TXT["metrics"]["E_base"], f"{E_x:.1f}")
-    st.metric(TXT["metrics"]["E_total"], f"{E_total_x:.1f}")
+    st.metric(TXT["metrics"]["succ"], f"{S:.2%}")
+    st.metric(TXT["metrics"]["C"], f"{C:.1f}")
+    st.metric(TXT["metrics"]["Closs"], f"{C_loss:.1f}")
+    st.metric(TXT["metrics"]["E_base"], f"{E:.1f}")
+    st.metric(TXT["metrics"]["E_total"], f"{E_total:.1f}")
 
 with right:
-    # ----------------------------------------------------------
-    # Quality × Schedule matrix
-    # ----------------------------------------------------------
+    # Quality × Schedule matrix ────────────────────────────────
     st.subheader(TXT["charts"]["quality_schedule"]["title"])
     exp("charts.quality_schedule.expander_title")
 
     scenarios = [
-        ("Std/On", "Standard", "OnTime"),
-        ("Std/Late", "Standard", "Late"),
-        ("Low/On", "Low", "OnTime"),
-        ("Low/Late", "Low", "Late"),
+        ("Std/On",  "Standard", "OnTime"),
+        ("Std/Late","Standard", "Late"),
+        ("Low/On",  "Low",      "OnTime"),
+        ("Low/Late","Low",      "Late"),
     ]
     bars = []
-    for name, qg, scd in scenarios:
-        S_p, _, _, _, E_tot_p = compute_metrics(
-            a1v=params["a1"],
-            a2v=params["a2"],
-            a3v=params["a3"],
+    for label, qg, scd in scenarios:
+        S_qs, _, _, _, E_tot_qs = compute_metrics(
+            a1v=params["a1"], a2v=params["a2"], a3v=params["a3"],
             bv=params["b0"],
             cross_ratio_v=params["cross_ratio"],
             prep_post_ratio_v=params["prep_post_ratio"],
             loss_unit_v=params["loss_unit"],
-            qualv=qg,
-            schedv=scd,
-            t1v=params["T1"],
-            t2v=params["T2"],
-            t3v=params["T3"],
+            qualv=qg, schedv=scd,
+            t1v=params["T1"], t2v=params["T2"], t3v=params["T3"],
         )
-        bars.append(dict(Scenario=name, E_total=E_tot_p, S=f"{S_p:.1%}"))
+        bars.append(dict(Scenario=label, E_total=E_tot_qs, S=f"{S_qs:.1%}"))
 
-    df_bars = pd.DataFrame(bars)
-    fig_q = px.bar(
-        df_bars,
-        x="Scenario",
-        y="E_total",
-        text="S",
+    df_qs = pd.DataFrame(bars)
+    fig_qs = px.bar(
+        df_qs, x="Scenario", y="E_total", text="S",
         color_discrete_sequence=["#000000"],
-        labels={
-            "E_total": TXT["metrics"]["E_total"],
-            "Scenario": "Scenario",
-        },
+        labels={"E_total": TXT["metrics"]["E_total"], "Scenario": ""}
     )
-    fig_q.update_traces(textposition="auto",
-                        insidetextfont_color="white",
-                        outsidetextfont_color="gray")
-    fig_q.update_layout(bargap=0.1, font=dict(size=14))
-    st.plotly_chart(fig_q, use_container_width=True)
+    fig_qs.update_traces(textposition="auto",
+                         insidetextfont_color="white",
+                         outsidetextfont_color="gray")
+    fig_qs.update_layout(font=dict(size=14), bargap=0.1, margin=dict(t=30, b=40))
+    st.plotly_chart(fig_qs, use_container_width=True)
 
-    # ----------------------------------------------------------
-    # Tornado sensitivity (±20 %)
-    # ----------------------------------------------------------
+    # Tornado local sensitivity  ────────────────────────────────
     st.subheader(TXT["charts"]["tornado"]["title"])
     exp("charts.tornado.expander_title")
 
+    # ① 影響度を再計算（±20 %）
     sens_targets = {
         "a1": params["a1"],
         "a2": params["a2"],
         "a3": params["a3"],
-        "b": params["b0"],
-        "cross_ratio": params["cross_ratio"],
-        "prep_post_ratio": params["prep_post_ratio"],
-        "loss_unit": params["loss_unit"],
+        "b0": params["b0"],
+        "CR": params["cross_ratio"],
+        "PP": params["prep_post_ratio"],
+        "L":  params["loss_unit"],
     }
+    # 引数名マッピング
     name_map = {
-        "a1": "a1v",
-        "a2": "a2v",
-        "a3": "a3v",
-        "b": "bv",
-        "cross_ratio": "cross_ratio_v",
-        "prep_post_ratio": "prep_post_ratio_v",
-        "loss_unit": "loss_unit_v",
+        "a1": "a1v", "a2": "a2v", "a3": "a3v",
+        "b0": "bv",  "CR": "cross_ratio_v",
+        "PP": "prep_post_ratio_v", "L": "loss_unit_v",
     }
-    tornado_rows = []
-    for k, v in sens_targets.items():
-        lo = max(v * 0.8, 0)
-        hi = (min(v * 1.2, 1) if k in ("a1", "a2", "a3", "b") else v * 1.2)
+    tornado_rows: List[Tuple[str, float]] = []
+    for key, base in sens_targets.items():
+        lo = max(base * 0.8, 0)
+        hi = base * 1.2 if key not in ("a1", "a2", "a3", "b0") else min(base * 1.2, 1)
 
-        kwargs_lo = {
-            "a1v": params["a1"],
-            "a2v": params["a2"],
-            "a3v": params["a3"],
-            "bv": params["b0"],
-            "cross_ratio_v": params["cross_ratio"],
-            "prep_post_ratio_v": params["prep_post_ratio"],
-            "loss_unit_v": params["loss_unit"],
-            "t1v": params["T1"],
-            "t2v": params["T2"],
-            "t3v": params["T3"],
-            "qualv": params["qual"],
-            "schedv": params["sched"],
-        }
-        kwargs_hi = kwargs_lo.copy()
-        kwargs_lo[name_map[k]] = lo
-        kwargs_hi[name_map[k]] = hi
+        def e_total_at(**override):
+            kw = dict(
+                a1v=params["a1"], a2v=params["a2"], a3v=params["a3"],
+                bv=params["b0"], cross_ratio_v=params["cross_ratio"],
+                prep_post_ratio_v=params["prep_post_ratio"], loss_unit_v=params["loss_unit"],
+                qualv=params["qual"], schedv=params["sched"],
+                t1v=params["T1"], t2v=params["T2"], t3v=params["T3"],
+            )
+            kw.update(override)
+            return compute_metrics(**kw)[4]  # E_total
 
-        _, _, _, _, E_lo = compute_metrics(**kwargs_lo)
-        _, _, _, _, E_hi = compute_metrics(**kwargs_hi)
-        delta = max(abs(E_lo - E_total_x), abs(E_hi - E_total_x)) / E_total_x * 100
-        tornado_rows.append((k, delta))
+        delta = max(
+            abs(e_total_at(**{name_map[key]: lo}) - E_total),
+            abs(e_total_at(**{name_map[key]: hi}) - E_total),
+        ) / E_total  # 相対変化 (0–1)
+
+        tornado_rows.append((key, delta))
 
     df_tornado = (
         pd.DataFrame(tornado_rows, columns=["Parameter", "RelChange"])
         .sort_values("RelChange", ascending=False)
     )
-    fig_t = px.bar(
-        df_tornado,
-        x="RelChange",
-        y="Parameter",
-        orientation="h",
-        color_discrete_sequence=["#000000"],
-        labels={"RelChange": TXT["charts"]["tornado"]["xaxis"], "Parameter": ""},
+
+    fig_tornado = make_sensitivity_bar(
+        df_tornado.rename(columns={"RelChange": "Tornado"}),
+        value_col="Tornado",
+        tick_fmt="{:.2%}",
+        order=df_tornado["Parameter"].tolist(),
     )
-    fig_t.update_layout(showlegend=False,
-                        yaxis=dict(categoryorder="total ascending"),
-                        font=dict(size=14),
-                        bargap=0.1)
-    st.plotly_chart(fig_t, use_container_width=True)
+    st.plotly_chart(fig_tornado, use_container_width=True)
+
+    # ---------------- NEW: Sobol global sensitivity ------------
+    st.subheader(TXT["charts"]["sobol"]["title"])
+    exp("charts.sobol.expander_title")
+
+    fig_sobol = make_sensitivity_bar(
+        df_sobol[["Parameter", "S1"]].rename(columns={"S1": "Sobol"}),
+        value_col="Sobol",
+        tick_fmt="{:.2f}",
+        order=df_sobol["Parameter"].tolist(),
+    )
+    st.plotly_chart(fig_sobol, use_container_width=True)
 
     # ----------------------------------------------------------
     # Relative & Standardised sensitivity charts
