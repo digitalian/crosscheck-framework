@@ -2,30 +2,48 @@ def get_text_labels(lang):
     LANG = "EN" if lang == "English" else "JA"
     return TXT_ALL[LANG]
 
-#
-# crosscheck_sim_promac_bw_v9_relative.py
-# Streamlit ≥1.35 | pip install streamlit plotly numpy pandas sympy
-
 import streamlit as st
 import numpy as np
 import sympy as sp
 import pandas as pd
 import plotly.express as px
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
+from typing import Tuple, Dict
 
+# ───────────────────────────────
+# Utility helpers for session state and standardized expanders
+def get_state(key, default):
+    """Retrieve or initialize a value in session_state."""
+    if key not in st.session_state:
+        st.session_state[key] = default
+    return st.session_state[key]
+
+def exp(path: str):
+    """Create an expander from nested TXT using dot-separated key path."""
+    keys = path.split(".")
+    d = TXT
+    for k in keys:
+        d = d[k]
+    content_keys = keys[:-1] + [keys[-1].replace("_title", "_content")]
+    c = TXT
+    for k in content_keys:
+        c = c[k]
+    with st.expander(d, expanded=False):
+        st.markdown(c)
 
 # ───────────────────────────────
 # Centralized core calculation function for the model
 def compute_metrics(
-    a1v=None, a2v=None, a3v=None, bv=None,
-    cross_ratio_v=None, prep_post_ratio_v=None, loss_unit_v=None,
-    qualv=None, schedv=None, t1v=None, t2v=None, t3v=None
-):
+    a1v: float, a2v: float, a3v: float, bv: float,
+    cross_ratio_v: float, prep_post_ratio_v: float, loss_unit_v: float,
+    qualv: str, schedv: str, t1v: float, t2v: float, t3v: float
+) -> Tuple[float, float, float, float, float]:
     """
-    Compute key output metrics (success rate, cost, loss-adjusted cost, efficiency, and total efficiency)
-    for a given set of parameters. If any argument is not provided, it defaults to the current sidebar value.
-    This allows reuse for scenario analysis and sensitivity calculations.
+    Compute key output metrics:
+    - S_x: overall success rate
+    - C_x: labor cost
+    - C_loss_x: loss-adjusted cost
+    - E_x: efficiency (C/S)
+    - E_total_x: total efficiency (C_loss/S)
     """
     # Fill in defaults from current sidebar inputs if not provided
     defaults = {
@@ -77,11 +95,11 @@ def make_sensitivity_bar(
     # Infer type and set properties
     if "rel" in value_col.lower():
         color = "#000000"
-        xaxis_label = TXT["rel_xaxis"]
+        xaxis_label = TXT["charts"]["relative_sensitivity"]["xaxis"]
         bar_order = order
     elif "std" in value_col.lower():
         color = "#000000"
-        xaxis_label = TXT["std_xaxis"]
+        xaxis_label = TXT["charts"]["standardized_sensitivity"]["xaxis"]
         bar_order = order
     else:
         color = "#000000"
@@ -116,208 +134,196 @@ if "lang" not in st.session_state:
     st.session_state.lang = "English"
 lang = st.sidebar.radio("Language / 言語", ["English", "日本語"], index=0, key="lang", horizontal=True)
 
-LANG = "EN" if lang == "English" else "JA"
+# ─────────────────────────── Nested text definitions
 TXT_EN = {
+    "panel": {
         "input": "INPUT PANEL",
         "output": "KEY OUTPUT METRICS",
+    },
+    "metrics": {
         "a_total": "a_total",
         "succ": "Success Rate S",
         "C": "Labor Cost C",
         "Closs": "C_total (with loss)",
         "E_base": "Efficiency E (baseline)",
         "E_total": "E_total (cost per success)",
-        "tornado_title": "Tornado Sensitivity (±20%)",
-        "tornado_explain": "This chart visualizes the effect of ±20% changes in key parameters on E_total (cost per success).  \nSelected parameters (a₁, a₂, a₃, b₀, CR, PP, ℓ) are core drivers of success, effort, and loss.  \nThis helps identify which inputs most strongly affect cost-efficiency.",
-        "spider_title": "Standardized Sensitivity (∂E/∂x × σₓ/σ_E)",
-        "spider_explain": "This chart quantifies the influence of each parameter on E_total, normalized by its variability.  \nStandardized sensitivity highlights how strongly each uncertain factor contributes to the variance of cost efficiency.  \nUseful for uncertainty-based risk assessment. Includes loss-adjusted cost (C_total) and the approximated effect of total labor time (T), estimated as the midpoint of standardized sensitivities of cost and loss.",
-        "qs_title": "Quality × Schedule 2×2 Matrix",
-        "qs_explain": "Each bar shows E_total under different combinations of quality and schedule, with labels showing the corresponding success rate.  \nThis helps compare cost-performance tradeoffs across operational scenarios.",
-        "mc_title": "Monte Carlo Summary Statistics",
-        "mc_explain": "The following parameters are assigned probabilistic distributions to capture plausible uncertainty ranges:\n- **a₁, a₂**: Normally distributed (mean = selected value, σ = 0.03), reflecting variation in basic process success rates due to human or environmental variability.\n- **a₃**: Triangular distribution (±10%) to reflect process-specific asymmetry in the final step's reliability.\n- **b₀**: Uniform between 0.70–0.90, assuming checker quality varies widely across contexts.\n- **Cross-ratio (CR)** and **Prep/Post ratio (PP)**: Triangular (±20%) around selected values to reflect managerial estimation variance.\n- **Loss unit ℓ**: Triangular (±20%) for capturing business risk variability.\n\nThese distributions are selected based on empirical heuristics: normal for stable processes (a₁, a₂), triangular for bounded uncertain estimates (a₃, CR, PP, ℓ), and uniform for quality variability (b₀).",
-        "rel_title": "Relative Sensitivity (∂E/∂x × x/E)",
-        "rel_explain": "This chart shows the elasticity of E_total with respect to each parameter, representing the impact from a 1% input change.  \nRelative sensitivity helps identify which parameters most affect cost efficiency in response to design or policy changes.  \nUseful for prioritizing improvement efforts. Includes loss-adjusted cost (C_total) and approximated effect of total labor time (T), computed as the mean of sensitivities of C and C_total.",
-        "mc_variable": "MC variable",
-        "rel_xaxis": "Relative Sensitivity (∂E/∂x × x/E)",
-        "std_xaxis": "Standardized Sensitivity (ΔE/σ_E)",
-        "T": "Labor Time T",
-        "mean": "Mean",
-        "median": "Median",
-        "ci": "5–95% CI",
-        "mc_caption": {
-            "ja": "モンテカルロ法による出力分布。中央値・平均値は実線、信頼区間（5%–95%）は点線で表示。",
-            "en": "Monte Carlo simulation output distribution. Solid lines indicate median and mean; dotted lines show the 5–95% CI."
+    },
+    "charts": {
+        "quality_schedule": {
+            "title": "Quality × Schedule 2×2 Matrix",
+            "expander_title": "📘 About Quality × Schedule Chart",
+            "expander_content": (
+                "Each bar shows E_total under different combinations of quality and schedule, "
+                "with labels showing the corresponding success rate.  \n\n"
+                "This helps compare cost-performance tradeoffs across operational scenarios."
+            ),
         },
-        # Added keys:
-        "rel_sens_hint": "Efficiency per unit parameter value (E / x)",
-        "std_sens_hint": "Elasticity of E_total w.r.t each parameter (∂E/∂x × x / E)",
-        # Quality × Schedule expander keys
-        "qs_expander_title": "📘 About Quality × Schedule Chart",
-        "qs_expander_content": "Each bar shows E_total under different combinations of quality and schedule, with labels showing the corresponding success rate.\n\nThis helps compare cost-performance tradeoffs across operational scenarios.",
-        # Relative Sensitivity expander
-        "rel_sens_expander_title": "📘 About Relative Sensitivity",
-        "rel_sens_expander_content": (
-            "This chart shows the elasticity of E_total with respect to each parameter, representing the impact from a 1% input change.  \n"
-            "Relative sensitivity helps identify which parameters most affect cost efficiency in response to design or policy changes.  \n"
-            "Useful for prioritizing improvement efforts. Includes loss-adjusted cost (C_total) and approximated effect of total labor time (T), "
-            "computed as the mean of sensitivities of C and C_total."
-        ),
-        # Standardized Sensitivity expander
-        "std_sens_expander_title": "📘 About Standardized Sensitivity",
-        "std_sens_expander_content": (
-            "This chart quantifies the influence of each parameter on E_total, normalized by its variability.  \n"
-            "Standardized sensitivity highlights how strongly each uncertain factor contributes to the variance of cost efficiency.  \n"
-            "Useful for uncertainty-based risk assessment. Includes loss-adjusted cost (C_total) and the approximated effect of total labor time (T), "
-            "estimated as the midpoint of standardized sensitivities of cost and loss."
-        ),
-        # --- Added by user request ---
-        "impact_chart_expander_title": "📘 Explanation: Impact of ±20% Parameter Changes",
-        "impact_chart_expander_content": (
-            "This chart visualizes the effect of ±20% changes in key parameters on E_total (cost per success).  \n"
-            "Selected parameters (a₁, a₂, a₃, b₀, CR, PP, ℓ) are core drivers of success, effort, and loss.  \n"
-            "This helps identify which inputs most strongly affect cost-efficiency."
-        ),
-        "mc_summary_expander_title": "📘 Explanation: Monte Carlo Parameter Distributions",
-        "mc_summary_expander_content": (
-            "The following parameters are assigned probabilistic distributions to capture plausible uncertainty ranges:  \n\n"
-            "- **a₁, a₂**: Normally distributed (mean = selected value, σ = 0.03), reflecting variation in basic process success rates due to human or environmental variability.  \n"
-            "- **a₃**: Triangular distribution (±10%) to reflect process-specific asymmetry in the final step's reliability.  \n"
-            "- **b₀**: Uniform between 0.70–0.90, assuming checker quality varies widely across contexts.  \n"
-            "- **Cross-ratio (CR), Prep/Post ratio (PP)**: Triangular (±20%) around selected values to reflect managerial estimation variance.  \n"
-            "- **Loss unit ℓ**: Triangular (±20%) for capturing business risk variability.  \n\n"
-            "These distributions are selected based on empirical heuristics: normal for stable processes (a₁, a₂), triangular for bounded uncertain estimates (a₃, CR, PP, ℓ), and uniform for quality variability (b₀)."
-        )
+        "tornado": {
+            "title": "Tornado Sensitivity (±20%)",
+            "expander_title": "📘 Explanation: Impact of ±20% Parameter Changes",
+            "expander_content": (
+                "This chart visualizes the effect of ±20% changes in key parameters on E_total (cost per success).  \n"
+                "Selected parameters (a₁, a₂, a₃, b₀, CR, PP, ℓ) are core drivers of success, effort, and loss.  \n"
+                "This helps identify which inputs most strongly affect cost-efficiency."
+            ),
+            "xaxis": "|ΔE/E| (%)",
+        },
+        "relative_sensitivity": {
+            "title": "Relative Sensitivity (∂E/∂x × x/E)",
+            "xaxis": "Relative Sensitivity (∂E/∂x × x/E)",
+            "expander_title": "📘 About Relative Sensitivity",
+            "expander_content": (
+                "This chart shows the elasticity of E_total with respect to each parameter, "
+                "representing the impact from a 1% input change.  \n"
+                "Relative sensitivity helps identify which parameters most affect cost efficiency in response to design or policy changes.  \n"
+                "Useful for prioritizing improvement efforts. Includes loss-adjusted cost (C_total) and approximated effect of total labor time (T), computed as the mean of sensitivities of C and C_total."
+            ),
+        },
+        "standardized_sensitivity": {
+            "title": "Standardized Sensitivity (∂E/∂x × σₓ/σ_E)",
+            "xaxis": "Standardized Sensitivity (ΔE/σ_E)",
+            "expander_title": "📘 About Standardized Sensitivity",
+            "expander_content": (
+                "This chart quantifies the influence of each parameter on E_total, normalized by its variability.  \n"
+                "Standardized sensitivity highlights how strongly each uncertain factor contributes to the variance of cost efficiency.  \n"
+                "Useful for uncertainty-based risk assessment. Includes loss-adjusted cost (C_total) and the approximated effect of total labor time (T), estimated as the midpoint of standardized sensitivities of cost and loss."
+            ),
+        },
+        "monte_carlo": {
+            "title": "Monte Carlo Summary Statistics",
+            "variable": "MC variable",
+            "expander_title": "📘 Explanation: Monte Carlo Parameter Distributions",
+            "expander_content": (
+                "The following parameters are assigned probabilistic distributions to capture plausible uncertainty ranges:  \n\n"
+                "- **a₁, a₂**: Normally distributed (mean = selected value, σ = 0.03), reflecting variation in basic process success rates due to human or environmental variability.  \n"
+                "- **a₃**: Triangular distribution (±10%) to reflect process-specific asymmetry in the final step's reliability.  \n"
+                "- **b₀**: Uniform between 0.70–0.90, assuming checker quality varies widely across contexts.  \n"
+                "- **Cross-ratio (CR), Prep/Post ratio (PP)**: Triangular (±20%) around selected values to reflect managerial estimation variance.  \n"
+                "- **Loss unit ℓ**: Triangular (±20%) for capturing business risk variability.  \n\n"
+                "These distributions are selected based on empirical heuristics: normal for stable processes (a₁, a₂), triangular for bounded uncertain estimates (a₃, CR, PP, ℓ), and uniform for quality variability (b₀)."
+            ),
+            "mean": "Mean",
+            "median": "Median",
+            "ci": "5–95% CI",
+            "caption": {
+                "en": "Monte Carlo simulation output distributions with median, mean (solid), and 5–95% CI (dotted)",
+                "ja": "モンテカルロ法による出力分布：中央値・平均値（実線）、信頼区間5–95%（点線）"
+            },
+            "card_unit": "[E_total]",
+        }
     }
+}
 TXT_JA = {
+    "panel": {
         "input": "入力パネル",
         "output": "主要出力指標",
+    },
+    "metrics": {
         "a_total": "a_total",
         "succ": "成功率 S",
         "C": "C（作業工数）",
         "Closs": "C_total（損失込）",
         "E_base": "効率 E（ベースライン）",
         "E_total": "E_total（成功1件あたりの総コスト）",
-        "tornado_title": "トルネード感度分析（±20%）",
-        "tornado_explain": "このチャートは、主要パラメータを±20%変化させた際のE_total（成功1件あたりの総コスト）への影響を可視化します。  \n対象パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）は、成功率・作業工数・損失額に影響を与える主要因として選定しています。  \nこれにより、コスト効率に最も影響を与える要因を特定できます。",
-        "spider_title": "標準化感度（∂E/∂x × σₓ/σ_E）",
-        "spider_explain": "各パラメータのばらつきを基準にE_totalへの影響度を標準化して定量化します。  \n標準化感度は、コスト効率に対する不確実性（ばらつき）の寄与を示し、リスク評価に有効です。  \n損失込みのコスト（C_total）と全体作業時間（T）の影響も含めています。T の標準化感度は C と L の中間として近似しています。",
-        "qs_title": "品質×納期の2×2マトリクス",
-        "qs_explain": "品質と納期の組み合わせごとのE_totalを棒グラフで示し、ラベルとして成功率を表示します。  \n運用シナリオごとのコストパフォーマンスの比較に役立ちます。",
-        "mc_title": "モンテカルロ要約統計",
-        "mc_explain": "以下のパラメータに確率的な揺らぎを与え、不確実性をモデル化しています：\n- **a₁, a₂**：平均を中心とした正規分布（σ=0.03）、人的または環境要因による変動を想定。\n- **a₃**：±10%の三角分布。最終工程に特有の非対称性を考慮。\n- **b₀**：0.70～0.90の一様分布。チェック品質の個人差を反映。\n- **クロスチェック比率（CR）・準備/事後比率（PP）**：±20%の三角分布。マネジメント判断のばらつきを想定。\n- **損失単位 ℓ**：±20%の三角分布。ビジネスリスクのばらつきを反映。\n\nこれらの分布は、経験的な判断に基づいて選定しています。",
-        "rel_title": "相対感度（∂E/∂x × x/E）",
-        "rel_explain": "各パラメータを1%変更した際のE_totalへの影響度（弾性）を示します。  \n相対感度は設計変更や方針変更による影響度の大きさを示し，改善の優先順位づけに有効です。  \n損失込みのコスト（C_total）と全体作業時間（T）の影響も含めています。T の相対感度は C と C_total の平均として近似しています。",
-        "mc_variable": "MC対象変数",
-        "rel_xaxis": "相対感度（∂E/∂x × x/E）",
-        "std_xaxis": "標準化感度（ΔE/σ_E）",
-        "T": "作業時間 T",
-        "mean": "平均",
-        "median": "中央値",
-        "ci": "5〜95%信頼区間",
-        "mc_caption": {
-            "ja": "モンテカルロ法による出力分布。中央値・平均値は実線、信頼区間（5%–95%）は点線で表示。",
-            "en": "Monte Carlo simulation output distribution. Solid lines indicate median and mean; dotted lines show the 5–95% CI."
+    },
+    "charts": {
+        "quality_schedule": {
+            "title": "品質×納期の2×2マトリクス",
+            "expander_title": "📘 品質 × 納期グラフについて",
+            "expander_content": (
+                "各バーは品質・納期の組み合わせごとのE_total（成功1件あたり総コスト）を示し、"
+                "ラベルはその時の成功率です。  \n\n"
+                "運用シナリオごとのコストパフォーマンスの違いを比較できます。"
+            ),
         },
-        # Added keys:
-        "rel_sens_hint": "各パラメータ単位あたりの効率（E ÷ 値）",
-        "std_sens_hint": "各パラメータに対する感度（∂E/∂x × x / E）",
-        # Quality × Schedule expander keys
-        "qs_expander_title": "📘 品質 × 納期グラフについて",
-        "qs_expander_content": "各棒グラフは、品質と納期の組み合わせごとの E_total（総合効率）を示しており、棒のラベルにはその時の成功率が表示されています。\n\nこれにより、異なる運用シナリオにおけるコストとパフォーマンスのバランスを比較できます。",
-        # Relative Sensitivity expander
-        "rel_sens_expander_title": "📘 相対感度グラフについて",
-        "rel_sens_expander_content": (
-            "各パラメータを1%変更した際のE_totalへの影響度（弾性）を示します。  \n"
-            "相対感度は設計変更や方針変更による影響度の大きさを示し，改善の優先順位づけに有効です。  \n"
-            "損失込みのコスト（C_total）と全体作業時間（T）の影響も含めています。T の相対感度は C と C_total の平均として近似しています。"
-        ),
-        # Standardized Sensitivity expander
-        "std_sens_expander_title": "📘 標準化感度グラフについて",
-        "std_sens_expander_content": (
-            "各パラメータのばらつきを基準にE_totalへの影響度を標準化して定量化します。  \n"
-            "標準化感度は、コスト効率に対する不確実性（ばらつき）の寄与を示し、リスク評価に有効です。  \n"
-            "損失込みのコスト（C_total）と全体作業時間（T）の影響も含めています。T の標準化感度は C と L の中間として近似しています。"
-        ),
-        # --- Added by user request ---
-        "impact_chart_expander_title": "📘 説明：パラメータ±20％変化の影響",
-        "impact_chart_expander_content": (
-            "このグラフは，主要パラメータを±20％変動させたときのE_total（成功あたりコスト）への影響を可視化します。  \n"
-            "対象パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）は，成功率・作業コスト・損失の主要因です。  \n"
-            "どのパラメータがコスト効率に強く影響するかを把握できます。"
-        ),
-        "mc_summary_expander_title": "📘 説明：モンテカルロにおけるパラメータ分布",
-        "mc_summary_expander_content": (
-            "以下のパラメータに確率分布を設定し，不確実性の範囲をモデル化しています：  \n\n"
-            "- **a₁, a₂**：平均値を中心とする正規分布（σ = 0.03）。作業成功率の人為的・環境的ばらつきを反映。  \n"
-            "- **a₃**：±10%の三角分布。工程ごとの非対称性を想定。  \n"
-            "- **b₀**：0.70～0.90の一様分布。確認者品質の個人差を想定。  \n"
-            "- **CR・PP**：±20%の三角分布。見積誤差を想定。  \n"
-            "- **損失単位 ℓ**：±20%の三角分布。事業リスクの不確実性を表現。  \n\n"
-            "分布の選定は経験則に基づいています。正規分布は安定した工程，三角分布は管理上の見積不確実性，一様分布は品質ばらつきを想定します。"
-        )
+        "tornado": {
+            "title": "トルネード感度分析（±20%）",
+            "expander_title": "📘 説明：パラメータ±20％変化の影響",
+            "expander_content": (
+                "このグラフは主要パラメータ（a₁, a₂, a₃, b₀, CR, PP, ℓ）を±20%変化させたときのE_total（成功1件あたり総コスト）への影響を示します。  \n"
+                "どの入力がコスト効率に最も強く影響するかを可視化します。"
+            ),
+            "xaxis": "|ΔE/E| (%)",
+        },
+        "relative_sensitivity": {
+            "title": "相対感度（∂E/∂x × x/E）",
+            "xaxis": "相対感度（∂E/∂x × x/E）",
+            "expander_title": "📘 相対感度グラフについて",
+            "expander_content": (
+                "各パラメータを1%変化させたときのE_total（総合コスト効率）の変化率（弾性値）を示します。  \n"
+                "設計や運用改善の優先度を考える上で、どの因子が効率に最も影響するか把握できます。  \n"
+                "損失込コスト（C_total）と、総労働時間（T）はCとC_totalの感度の平均で近似しています。"
+            ),
+        },
+        "standardized_sensitivity": {
+            "title": "標準化感度（∂E/∂x × σₓ/σ_E）",
+            "xaxis": "標準化感度（ΔE/σ_E）",
+            "expander_title": "📘 標準化感度グラフについて",
+            "expander_content": (
+                "各パラメータのばらつき（標準偏差）で正規化したE_totalへの影響度を示します。  \n"
+                "不確実性によるリスク評価や、どの因子の分散がコスト効率の不安定さに寄与しているかを把握できます。  \n"
+                "損失込コスト（C_total）と総労働時間（T）は、それぞれの標準化感度の中間値で近似しています。"
+            ),
+        },
+        "monte_carlo": {
+            "title": "モンテカルロ要約統計",
+            "variable": "MC対象変数",
+            "expander_title": "📘 説明：モンテカルロにおけるパラメータ分布",
+            "expander_content": (
+                "以下のパラメータに不確実性（分布）を仮定してシミュレーションを行います：  \n\n"
+                "- **a₁, a₂**：正規分布（平均=選択値、σ=0.03）で、人や環境によるばらつきを反映  \n"
+                "- **a₃**：三角分布（±10%）で最終工程の非対称な信頼性を表現  \n"
+                "- **b₀**：一様分布（0.70–0.90）でチェッカー品質の幅広い状況を想定  \n"
+                "- **クロス比（CR）、準備・後処理比（PP）**：三角分布（±20%）で見積り誤差を反映  \n"
+                "- **損失単価 ℓ**：三角分布（±20%）でビジネスリスクの幅を表現  \n\n"
+                "分布の選択は経験則に基づき、安定工程（a₁, a₂）は正規、推定値（a₃, CR, PP, ℓ）は三角、一様（b₀）は品質の幅広さを想定しています。"
+            ),
+            "mean": "平均値",
+            "median": "中央値",
+            "ci": "信頼区間5–95%",
+            "caption": {
+                "en": "Monte Carlo simulation output distributions with median, mean (solid), and 5–95% CI (dotted)",
+                "ja": "モンテカルロ法による出力分布：中央値・平均値（実線）、信頼区間5–95%（点線）"
+            },
+            "card_unit": "[E_total]",
+        }
     }
+}
 TXT_ALL = {"EN": TXT_EN, "JA": TXT_JA}
 TXT = get_text_labels(lang)
 
-# ───────────────────────────────
-
-# ───────────────────────────────
+# ──────────────────────────────────────────────────
 # Sidebar input encapsulation with session state
 def get_sidebar_params():
-    st.sidebar.title(TXT["input"])  
+    st.sidebar.title(TXT["panel"]["input"])
     # a1
-    if "a1" not in st.session_state:
-        st.session_state.a1 = 0.95
-    a1 = st.sidebar.slider("a1 (step 1 success rate)", 0.5, 1.0, st.session_state.a1, 0.01, key="a1")
+    a1 = st.sidebar.slider("a1 (step 1 success rate)", 0.5, 1.0, get_state("a1", 0.95), 0.01, key="a1")
     # a2
-    if "a2" not in st.session_state:
-        st.session_state.a2 = 0.95
-    a2 = st.sidebar.slider("a2 (step 2 success rate)", 0.5, 1.0, st.session_state.a2, 0.01, key="a2")
+    a2 = st.sidebar.slider("a2 (step 2 success rate)", 0.5, 1.0, get_state("a2", 0.95), 0.01, key="a2")
     # a3
-    if "a3" not in st.session_state:
-        st.session_state.a3 = 0.80
-    a3 = st.sidebar.slider("a3 (step 3 success rate)", 0.5, 1.0, st.session_state.a3, 0.01, key="a3")
+    a3 = st.sidebar.slider("a3 (step 3 success rate)", 0.5, 1.0, get_state("a3", 0.80), 0.01, key="a3")
     # b0
-    if "b0" not in st.session_state:
-        st.session_state.b0 = 0.80
-    b0 = st.sidebar.slider("b0 (checker success rate)", 0.0, 1.0, st.session_state.b0, 0.01, key="b0")
+    b0 = st.sidebar.slider("b0 (checker success rate)", 0.0, 1.0, get_state("b0", 0.80), 0.01, key="b0")
     # Group Quality and Schedule side-by-side
     col_qs1, col_qs2 = st.sidebar.columns(2)
-    if "qual" not in st.session_state:
-        st.session_state.qual = "Standard"
     with col_qs1:
-        qual = st.selectbox("Qual-Grade", ["Standard", "Low"], index=0 if st.session_state.qual == "Standard" else 1, key="qual")
-    if "sched" not in st.session_state:
-        st.session_state.sched = "OnTime"
+        qual = st.selectbox("Qual-Grade", ["Standard", "Low"], index=0 if get_state("qual", "Standard") == "Standard" else 1, key="qual")
     with col_qs2:
-        sched = st.selectbox("Schedule", ["OnTime", "Late"], index=0 if st.session_state.sched == "OnTime" else 1, key="sched")
+        sched = st.selectbox("Schedule", ["OnTime", "Late"], index=0 if get_state("sched", "OnTime") == "OnTime" else 1, key="sched")
     # loss_unit
-    if "loss_unit" not in st.session_state:
-        st.session_state.loss_unit = 0.0
-    loss_unit = st.sidebar.slider("Loss unit ℓ", 0.0, 50.0, st.session_state.loss_unit, 0.1, key="loss_unit")
+    loss_unit = st.sidebar.slider("Loss unit ℓ", 0.0, 50.0, get_state("loss_unit", 0.0), 0.1, key="loss_unit")
     # T1, T2, T3 grouped in a single row
-    if "T1" not in st.session_state:
-        st.session_state.T1 = 10
-    if "T2" not in st.session_state:
-        st.session_state.T2 = 10
-    if "T3" not in st.session_state:
-        st.session_state.T3 = 30
     col_t1, col_t2, col_t3 = st.sidebar.columns(3)
     with col_t1:
-        T1 = st.number_input("T1 (h)", 0, 200, st.session_state.T1, key="T1")
+        T1 = st.number_input("T1 (h)", 0, 200, get_state("T1", 10), key="T1")
     with col_t2:
-        T2 = st.number_input("T2 (h)", 0, 200, st.session_state.T2, key="T2")
+        T2 = st.number_input("T2 (h)", 0, 200, get_state("T2", 10), key="T2")
     with col_t3:
-        T3 = st.number_input("T3 (h)", 0, 200, st.session_state.T3, key="T3")
-    # cross_ratio and prep_post_ratio side-by-side
-    if "cross_ratio" not in st.session_state:
-        st.session_state.cross_ratio = 0.30
-    if "prep_post_ratio" not in st.session_state:
-        st.session_state.prep_post_ratio = 0.40
-    col_cr, col_pp = st.sidebar.columns(2)
-    with col_cr:
-        cross_ratio = st.slider("Cross-ratio", 0.0, 0.5, st.session_state.cross_ratio, 0.01, key="cross_ratio")
-    with col_pp:
-        prep_post_ratio = st.slider("Prep+Post ratio", 0.0, 0.5, st.session_state.prep_post_ratio, 0.01, key="prep_post_ratio")
+        T3 = st.number_input("T3 (h)", 0, 200, get_state("T3", 30), key="T3")
+    # cross_ratio
+    cross_ratio = st.sidebar.slider("Cross-ratio", 0.0, 0.5, get_state("cross_ratio", 0.30), 0.01, key="cross_ratio")
+    # prep_post_ratio
+    prep_post_ratio = st.sidebar.slider("Prep+Post ratio", 0.0, 0.5, get_state("prep_post_ratio", 0.40), 0.01, key="prep_post_ratio")
     return {
         "a1": a1,
         "a2": a2,
@@ -363,64 +369,72 @@ E       = C / S                            # Efficiency (cost per success, basel
 E_total = C_loss / S                       # Total efficiency (loss-adjusted cost per success)
 
 # ───────────────────────────────
+@st.cache_data(show_spinner=False)
+def run_mc(params: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run vectorized Monte Carlo simulation and return arrays (Evals, Svals, Cvals)."""
+    rng = np.random.default_rng(0)
+    # Vectorized parameter sampling
+    a1s = rng.normal(params["a1"], 0.03, N).clip(0, 1)
+    a2s = rng.normal(params["a2"], 0.03, N).clip(0, 1)
+    a3s = rng.triangular(params["a3"]*0.9, params["a3"], params["a3"]*1.1, N).clip(0,1)
+    b0s = rng.uniform(0.70, 0.90, N).clip(0,1)
+    # Time distributions
+    t1s = rng.normal(params["T1"], 0.5, N).clip(min=1)
+    t2s = rng.normal(params["T2"], 0.5, N).clip(min=1)
+    t3s = rng.normal(params["T3"], 0.5, N).clip(min=1)
+    cross_ratios = (
+        rng.triangular(params["cross_ratio"]*0.8, params["cross_ratio"], params["cross_ratio"]*1.2, N)
+        if params["cross_ratio"] > 0 else np.zeros(N)
+    )
+    prep_post_ratios = (
+        rng.triangular(params["prep_post_ratio"]*0.8, params["prep_post_ratio"], params["prep_post_ratio"]*1.2, N)
+        if params["prep_post_ratio"] > 0 else np.zeros(N)
+    )
+    loss_units = (
+        rng.triangular(params["loss_unit"]*0.8, params["loss_unit"], params["loss_unit"]*1.2, N)
+        if params["loss_unit"] > 0 else np.zeros(N)
+    )
+    # Compute metrics vectorized
+    a_tot = a1s * a2s * a3s
+    qual_T, qual_B = (1,1) if params["qual"]=="Standard" else (2/3,0.8)
+    sched_T, sched_B = (1,1) if params["sched"]=="OnTime" else (2/3,0.8)
+    b_eff = b0s * qual_B * sched_B
+    Svals = 1 - (1 - a_tot) * (1 - b_eff)
+    T = (params["T1"] + params["T2"] + params["T3"]) * qual_T * sched_T
+    Cvals = T * (1 + cross_ratios + prep_post_ratios)
+    Evals = (Cvals + loss_units * Cvals * (1 - Svals)) / Svals
+    return Evals, Svals, Cvals
 
-# ───────────────────────────────
-# Run Monte Carlo simulations to estimate output variability
-# Using normal, triangular, and uniform distributions depending on parameter characteristics
-if "sample_n" not in st.session_state:
-    st.session_state.sample_n = 100000
 # Place Sample Size and MC Variable selection side-by-side
 col_mc1, col_mc2 = st.sidebar.columns(2)
 with col_mc1:
-    sample_n = st.number_input(
-        "Sample Size", 1000, 1000000, value=st.session_state.sample_n, step=10000, key="sample_n"
+    sample_n = col_mc1.number_input(
+        "Sample Size", 1000, 1000000, get_state("sample_n", 100000), step=10000, key="sample_n"
     )
-N = sample_n
-rng = np.random.default_rng(0)
-a1s = rng.normal(params["a1"], 0.03, N).clip(0, 1)  # a1, a2: normal for stable process uncertainty
-a2s = rng.normal(params["a2"], 0.03, N).clip(0, 1)
-a3s = rng.triangular(params["a3"] * 0.9, params["a3"], params["a3"] * 1.1, N).clip(0, 1) if params["a3"] > 0 else np.zeros(N)  # a3: triangular
-b0s = rng.uniform(0.70, 0.90, N).clip(0, 1)  # b0: uniform for checker variability
-t1s = rng.normal(params["T1"], 0.5, N).clip(1)
-t2s = rng.normal(params["T2"], 0.5, N).clip(1)
-t3s = rng.normal(params["T3"], 0.5, N).clip(1)
-cross_ratios = (
-    rng.triangular(params["cross_ratio"] * 0.8, params["cross_ratio"], params["cross_ratio"] * 1.2, N)
-    if params["cross_ratio"] > 0 else np.zeros(N)
-)
-prep_post_ratios = (
-    rng.triangular(params["prep_post_ratio"] * 0.8, params["prep_post_ratio"], params["prep_post_ratio"] * 1.2, N)
-    if params["prep_post_ratio"] > 0 else np.zeros(N)
-)
-loss_units = (
-    rng.triangular(params["loss_unit"] * 0.8, params["loss_unit"], params["loss_unit"] * 1.2, N)
-    if params["loss_unit"] > 0 else np.zeros(N)
-)
 
-# Preallocate arrays for MC results
-Evals = np.empty(N)
-Svals = np.empty(N)
-Cvals = np.empty(N)
-for i in range(N):
-    # For each MC sample, calculate output metrics with sampled parameters
-    at = a1s[i] * a2s[i] * a3s[i]
-    be = b0s[i] * qual_B * sched_B
-    si = 1 - (1 - at) * (1 - be)
-    ci = (params["T1"] + params["T2"] + params["T3"]) * qual_T * sched_T * (1 + cross_ratios[i] + prep_post_ratios[i])
-    Evals[i] = (ci + loss_units[i] * ci * (1 - si)) / si
-    Svals[i] = si
-    Cvals[i] = ci
+# Run vectorized and cached MC simulation
+Evals, Svals, Cvals = run_mc(params, sample_n)
 
 # Calculate standard deviations for use in standardized sensitivity
 σE = Evals.std()
-σL = loss_units.std()
 σC = Cvals.std()
 σS = Svals.std()
+# For σL (loss_units), use the same distribution as in MC
+if params["loss_unit"] > 0:
+    mc_loss_units = np.random.triangular(
+        params["loss_unit"]*0.8,
+        params["loss_unit"],
+        params["loss_unit"]*1.2,
+        sample_n
+    )
+else:
+    mc_loss_units = np.zeros(sample_n)
+σL = np.std(mc_loss_units)
 
 # ───────────────────────────────
-
 # Symbolic derivatives utility function
-def symbolic_derivatives(C, S, L):
+def symbolic_derivatives(C: float, S: float, L: float) -> Dict[str, float]:
+    """Return partial derivatives of E with respect to C, S, and L."""
     C_sym, S_sym, L_sym = sp.symbols("C S L")
     E = (C_sym + L_sym * (1 - S_sym)) / S_sym
     return {
@@ -442,31 +456,31 @@ std_S = dE_dS * σS / σE
 std_L = dE_dL * σL / σE
 
 # ───────────────────────────────
-# ───────────────────────────────
 # Output metrics and scenario analysis
 left, right = st.columns([1, 2])
 with left:
     # Output metrics for current scenario (main panel)
-    st.subheader(TXT["output"])
-    st.metric(TXT["a_total"], f"{a_total:.4f}")
+    st.subheader(TXT["panel"]["output"])
+    st.metric(TXT["metrics"]["a_total"], f"{a_total:.4f}")
     S_x, C_x, C_loss_x, E_x, E_total_x = compute_metrics(
         a1v=params["a1"], a2v=params["a2"], a3v=params["a3"], bv=params["b0"],
         cross_ratio_v=params["cross_ratio"], prep_post_ratio_v=params["prep_post_ratio"],
-        loss_unit_v=params["loss_unit"], t1v=params["T1"], t2v=params["T2"], t3v=params["T3"]
+        loss_unit_v=params["loss_unit"], qualv=params["qual"], schedv=params["sched"],
+        t1v=params["T1"], t2v=params["T2"], t3v=params["T3"]
     )
-    st.metric(TXT["succ"],    f"{S_x:.2%}")
-    st.metric(TXT["C"],       f"{C_x:.1f}")
-    st.metric(TXT["Closs"],   f"{C_loss_x:.1f}")
-    st.metric(TXT["E_base"],  f"{E_x:.1f}")
-    st.metric(TXT["E_total"], f"{E_total_x:.1f}")
+    st.metric(TXT["metrics"]["succ"],    f"{S_x:.2%}")
+    st.metric(TXT["metrics"]["C"],       f"{C_x:.1f}")
+    st.metric(TXT["metrics"]["Closs"],   f"{C_loss_x:.1f}")
+    st.metric(TXT["metrics"]["E_base"],  f"{E_x:.1f}")
+    st.metric(TXT["metrics"]["E_total"], f"{E_total_x:.1f}")
 
 
 with right:
+
     # ───────────────────────────────
     # Quality × Schedule scenario matrix
-    st.subheader(TXT['qs_title'])
-    with st.expander(TXT["qs_expander_title"], expanded=False):
-        st.markdown(TXT["qs_expander_content"])
+    st.subheader(TXT["charts"]["quality_schedule"]["title"])
+    exp("charts.quality_schedule.expander_title")
     scenarios = [("Std/On","Standard","OnTime"),
                  ("Std/Late","Standard","Late"),
                  ("Low/On","Low","OnTime"),
@@ -486,9 +500,15 @@ with right:
     # Standardize y/column names for clarity
     df_bars = pd.DataFrame(bars)
     df_bars.columns = ["Scenario", "E_total", "S"]  # Ensure correct order
-    fig_q = px.bar(df_bars, x="Scenario", y="E_total", text="S",
-                   color_discrete_sequence=["#000000"],
-                   labels={"E_total": TXT["E_total"], "S": TXT["succ"], "Scenario": "Scenario"})
+    fig_q = px.bar(
+        df_bars, x="Scenario", y="E_total", text="S",
+        color_discrete_sequence=["#000000"],
+        labels={
+            "E_total": TXT["metrics"]["E_total"],
+            "S": TXT["metrics"]["succ"],
+            "Scenario": "Scenario"
+        }
+    )
     fig_q.update_traces(
         textposition="auto",
         insidetextfont_color="white",
@@ -499,12 +519,9 @@ with right:
 
     # ───────────────────────────────
     # Tornado Sensitivity Analysis (±20% parameter changes)
-    st.subheader(TXT['tornado_title'])
+    st.subheader(TXT["charts"]["tornado"]["title"])
     # Relative Impact Chart expander above the chart
-    st.markdown("### " + TXT["impact_chart_title"] if "impact_chart_title" in TXT else TXT["tornado_title"])
-    with st.expander(TXT["impact_chart_expander_title"], expanded=False):
-        st.markdown(TXT["impact_chart_expander_content"])
-    dark, light = "#000000", "#000000"
+    exp("charts.tornado.expander_title")
     params_for_sens = {
         "a1": params["a1"],
         "a2": params["a2"],
@@ -536,12 +553,14 @@ with right:
                 _, _, _, _, E_var_lo = compute_metrics(
                     a1v=params["a1"], a2v=params["a2"], a3v=params["a3"], bv=params["b0"],
                     cross_ratio_v=params["cross_ratio"], prep_post_ratio_v=params["prep_post_ratio"],
-                    loss_unit_v=params["loss_unit"], t1v=lo_T[0], t2v=lo_T[1], t3v=lo_T[2]
+                    loss_unit_v=params["loss_unit"], qualv=params["qual"], schedv=params["sched"],
+                    t1v=lo_T[0], t2v=lo_T[1], t3v=lo_T[2]
                 )
                 _, _, _, _, E_var_hi = compute_metrics(
                     a1v=params["a1"], a2v=params["a2"], a3v=params["a3"], bv=params["b0"],
                     cross_ratio_v=params["cross_ratio"], prep_post_ratio_v=params["prep_post_ratio"],
-                    loss_unit_v=params["loss_unit"], t1v=hi_T[0], t2v=hi_T[1], t3v=hi_T[2]
+                    loss_unit_v=params["loss_unit"], qualv=params["qual"], schedv=params["sched"],
+                    t1v=hi_T[0], t2v=hi_T[1], t3v=hi_T[2]
                 )
                 rel_delta_lo = abs(E_var_lo - E_total_x) / E_total_x * 100
                 rel_delta_hi = abs(E_var_hi - E_total_x) / E_total_x * 100
@@ -565,6 +584,11 @@ with right:
         kwargs_hi = kwargs_lo.copy()
         kwargs_lo[name_map.get(k, k)] = lo
         kwargs_hi[name_map.get(k, k)] = hi
+        # Add qualv and schedv to both kwargs
+        kwargs_lo["qualv"] = params["qual"]
+        kwargs_lo["schedv"] = params["sched"]
+        kwargs_hi["qualv"] = params["qual"]
+        kwargs_hi["schedv"] = params["sched"]
         _, _, _, _, E_var_lo = compute_metrics(**kwargs_lo)
         _, _, _, _, E_var_hi = compute_metrics(**kwargs_hi)
         rel_delta_lo = abs(E_var_lo - E_total_x) / E_total_x * 100
@@ -572,12 +596,15 @@ with right:
         rows.append((k, max(rel_delta_lo, rel_delta_hi)))
     df_t=pd.DataFrame(rows, columns=["Parameter","RelChange"])\
            .sort_values("RelChange", ascending=False)
-    maxd=df_t["RelChange"].max()
-    df_t["color"]=np.where(df_t["RelChange"]==maxd, dark, light)
     # Standardize tornado axis/label
-    fig_t=px.bar(df_t, x="RelChange", y="Parameter", orientation="h",
-                 color="color", color_discrete_map={dark:dark, light:light},
-                 labels={"RelChange":"|ΔE/E| (%)","Parameter": TXT["rel_xaxis"]})
+    fig_t = px.bar(
+        df_t, x="RelChange", y="Parameter", orientation="h",
+        color_discrete_sequence=["#000000"],
+        labels={
+            "RelChange": TXT["charts"]["tornado"]["xaxis"],
+            "Parameter": ""
+        }
+    )
     fig_t.update_traces(text=df_t["RelChange"].map("{:.1f}%".format), textposition="auto", insidetextfont_color="white", outsidetextfont_color="gray")
     fig_t.update_layout(showlegend=False,
                         yaxis=dict(categoryorder="total ascending"),
@@ -589,22 +616,22 @@ with right:
     # Compute elasticity-based relative and standardized sensitivities for E_total using unified config
     sens_config = [
         {
-            "key": TXT["succ"],
+            "key": TXT["metrics"]["succ"],
             "rel_val": dE_dS * S_x / E_total_x,
             "std_val": dE_dS * σS / σE
         },
         {
-            "key": TXT["C"],
+            "key": TXT["metrics"]["C"],
             "rel_val": dE_dC * C_x / E_total_x,
             "std_val": dE_dC * σC / σE
         },
         {
-            "key": TXT["Closs"],
+            "key": TXT["metrics"]["Closs"],
             "rel_val": dE_dC * C_loss_x / E_total_x,
             "std_val": dE_dL * σL / σE
         },
         {
-            "key": TXT["T"],
+            "key": "T",
             # For T, rel_val and std_val are averaged as in previous logic
             "rel_val": None,
             "std_val": None
@@ -644,32 +671,26 @@ with right:
 # Display Relative and Standardized Sensitivity charts side by side using st.columns(2)
 col1, col2 = st.columns(2)
 with col1:
-    col1.markdown("### " + TXT["rel_title"])
-    with col1.expander(TXT["rel_sens_expander_title"], expanded=False):
-        st.markdown(TXT["rel_sens_expander_content"])
+    col1.subheader(TXT["charts"]["relative_sensitivity"]["title"])
+    exp("charts.relative_sensitivity.expander_title")
     col1.plotly_chart(fig_rel, use_container_width=True)
 with col2:
-    col2.markdown("### " + TXT["spider_title"])
-    with col2.expander(TXT["std_sens_expander_title"], expanded=False):
-        st.markdown(TXT["std_sens_expander_content"])
+    col2.subheader(TXT["charts"]["standardized_sensitivity"]["title"])
+    exp("charts.standardized_sensitivity.expander_title")
     col2.plotly_chart(fig_std, use_container_width=True)
 
 # ───────────────────────────────
-# Monte Carlo Summary and output distribution visualization
-st.subheader(TXT['mc_title'])
+ # Monte Carlo Summary and output distribution visualization
+st.subheader(TXT["charts"]["monte_carlo"]["title"])
 # Monte Carlo Summary Statistics expander above the stats
-st.markdown("### " + TXT["mc_summary_title"] if "mc_summary_title" in TXT else TXT["mc_title"])
-with st.expander(TXT["mc_summary_expander_title"], expanded=False):
-    st.markdown(TXT["mc_summary_expander_content"])
+exp("charts.monte_carlo.expander_title")
 
 options = ["E_total", "Success S"]
-if "mc_var" not in st.session_state:
-    st.session_state.mc_var = "E_total"
 with col_mc2:
-    mc_var = st.selectbox(
-        TXT["mc_variable"],
+    mc_var = col_mc2.selectbox(
+        TXT["charts"]["monte_carlo"]["variable"],
         options,
-        index=options.index(st.session_state.mc_var),
+        index=options.index(get_state("mc_var", "E_total")),
         key="mc_var"
     )
 data = Evals if mc_var == "E_total" else Svals
@@ -681,11 +702,20 @@ decimals = ".2f" if mc_var == "E_total" else ".4f"
 # Display Monte Carlo summary statistics in a horizontal layout with large font using st.metric()
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Mean", f"{mean:.2f}")
+    st.metric(
+        f"{TXT['charts']['monte_carlo']['mean']} {TXT['charts']['monte_carlo']['card_unit']}",
+        f"{mean:.2f}"
+    )
 with col2:
-    st.metric("Median", f"{median:.2f}")
+    st.metric(
+        f"{TXT['charts']['monte_carlo']['median']} {TXT['charts']['monte_carlo']['card_unit']}",
+        f"{median:.2f}"
+    )
 with col3:
-    st.metric("5–95% CI", f"{ci_low:.2f} – {ci_high:.2f}")
+    st.metric(
+        f"{TXT['charts']['monte_carlo']['ci']} {TXT['charts']['monte_carlo']['card_unit']}",
+        f"{ci_low:.2f} – {ci_high:.2f}"
+    )
 
 
 # Histogram label localization for MC output
@@ -713,6 +743,8 @@ mean_val = np.mean(mc_values)
 median_val = np.median(mc_values)
 p5 = np.percentile(mc_values, 5)
 p95 = np.percentile(mc_values, 95)
+# Remove annotation_text and use only line_dash and line_color as per instructions
+fig_mc_bar.add_vline(x=mean_val, line_dash="solid", line_color="#000000")
 fig_mc_bar.add_vline(x=median_val, line_dash="solid", line_color="#000000")
 fig_mc_bar.add_vline(x=p5, line_dash="dot", line_color="#000000")
 fig_mc_bar.add_vline(x=p95, line_dash="dot", line_color="#000000")
@@ -720,9 +752,17 @@ fig_mc_bar.update_layout(
     yaxis_title=LABELS["count"],
     bargap=0.01,
     xaxis_tickfont_size=12,
-    yaxis_tickfont_size=12
+    yaxis_tickfont_size=12,
+    margin=dict(t=70)
 )
 
 st.plotly_chart(fig_mc_bar, use_container_width=True)
 
-st.caption(TXT["mc_caption"]["ja"] if lang == "日本語" else TXT["mc_caption"]["en"])
+# Add language-dependent legend as a caption below the histogram
+legend_label = {
+    "en": "Legend: Mean (solid), Median (solid), 5–95% CI (dotted)",
+    "ja": "凡例：平均値（実線）、中央値（実線）、信頼区間5–95%（点線）"
+}
+st.caption(legend_label["en"] if lang == "English" else legend_label["ja"])
+
+# Remove any remaining references to TXT["rel_xaxis"] or TXT["std_xaxis"]
