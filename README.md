@@ -43,7 +43,7 @@ The CLI version accepts the following optional arguments:
 Examples:
 ```bash
 python src/main.py --streamlit
-python src/main.py --gerrit --lang ja
+python src/main.py --gerrit
 ```
 
 ---
