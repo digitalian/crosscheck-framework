@@ -18,7 +18,7 @@ It provides
 
 The script will
 
-- create .venv/ (if not present)
+- delete and recreate `.venv/` (⚠ all contents will be lost)
 - compute and display cross-check efficiency metrics per project
 - launch an interactive Streamlit dashboard with:
   - Elasticity and Standardized Sensitivity analysis
