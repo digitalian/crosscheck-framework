@@ -5,3 +5,4 @@ streamlit>=1.35
 plotly>=5.18
 watchdog>=4.0
 sympy>=1.12
+seaborn>=0.11
