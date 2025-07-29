@@ -287,23 +287,11 @@ TXT = get_text_labels(lang)
 # Sidebar input encapsulation with session state
 def get_sidebar_params():
     st.sidebar.title(TXT["panel"]["input"])
-    # a1
+    # 1. a1, a2, a3 sliders
     a1 = st.sidebar.slider("a1 (step 1 success rate)", 0.5, 1.0, get_state("a1", 0.95), 0.01, key="a1")
-    # a2
     a2 = st.sidebar.slider("a2 (step 2 success rate)", 0.5, 1.0, get_state("a2", 0.95), 0.01, key="a2")
-    # a3
     a3 = st.sidebar.slider("a3 (step 3 success rate)", 0.5, 1.0, get_state("a3", 0.80), 0.01, key="a3")
-    # b0
-    b0 = st.sidebar.slider("b0 (checker success rate)", 0.0, 1.0, get_state("b0", 0.80), 0.01, key="b0")
-    # Group Quality and Schedule side-by-side
-    col_qs1, col_qs2 = st.sidebar.columns(2)
-    with col_qs1:
-        qual = st.selectbox("Qual-Grade", ["Standard", "Low"], index=0 if get_state("qual", "Standard") == "Standard" else 1, key="qual")
-    with col_qs2:
-        sched = st.selectbox("Schedule", ["OnTime", "Late"], index=0 if get_state("sched", "OnTime") == "OnTime" else 1, key="sched")
-    # loss_unit
-    loss_unit = st.sidebar.slider("Loss unit ℓ", 0.0, 50.0, get_state("loss_unit", 0.0), 0.1, key="loss_unit")
-    # T1, T2, T3 grouped in a single row
+    # 2. Horizontal group of T1, T2, T3
     col_t1, col_t2, col_t3 = st.sidebar.columns(3)
     with col_t1:
         T1 = st.number_input("T1 (h)", 0, 200, get_state("T1", 10), key="T1")
@@ -311,10 +299,34 @@ def get_sidebar_params():
         T2 = st.number_input("T2 (h)", 0, 200, get_state("T2", 10), key="T2")
     with col_t3:
         T3 = st.number_input("T3 (h)", 0, 200, get_state("T3", 30), key="T3")
-    # cross_ratio
+    # 3. Horizontal group of qual and sched
+    col_qs1, col_qs2 = st.sidebar.columns(2)
+    with col_qs1:
+        qual = st.selectbox("Qual-Grade", ["Standard", "Low"], index=0 if get_state("qual", "Standard") == "Standard" else 1, key="qual")
+    with col_qs2:
+        sched = st.selectbox("Schedule", ["OnTime", "Late"], index=0 if get_state("sched", "OnTime") == "OnTime" else 1, key="sched")
+    # Separator before checker rate
+    st.sidebar.markdown("---")
+    # 4. b0 slider
+    b0 = st.sidebar.slider("b0 (checker success rate)", 0.0, 1.0, get_state("b0", 0.80), 0.01, key="b0")
+    # 5. cross_ratio slider
     cross_ratio = st.sidebar.slider("Cross-ratio", 0.0, 0.5, get_state("cross_ratio", 0.30), 0.01, key="cross_ratio")
-    # prep_post_ratio
+    # 6. prep_post_ratio slider
     prep_post_ratio = st.sidebar.slider("Prep+Post ratio", 0.0, 0.5, get_state("prep_post_ratio", 0.40), 0.01, key="prep_post_ratio")
+    # Separator before loss unit
+    st.sidebar.markdown("---")
+    # 7. loss_unit slider
+    loss_unit = st.sidebar.slider("Loss unit ℓ", 0.0, 50.0, get_state("loss_unit", 0.0), 0.1, key="loss_unit")
+    # Thick separator before Monte Carlo inputs
+    st.sidebar.markdown("<hr style='border-top:3px solid black'>", unsafe_allow_html=True)
+    # MC parameters section header
+    st.sidebar.title("MC PARAM")
+    # Horizontal group for sample size and MC variable
+    col_mc1, col_mc2 = st.sidebar.columns(2)
+    with col_mc1:
+        sample_n = st.number_input("Sample Size", 1000, 1000000, get_state("sample_n", 100000), step=10000, key="sample_n")
+    with col_mc2:
+        mc_var = st.selectbox("MC Variable", ["E_total", "Success S"], index=0, key="mc_var")
     return {
         "a1": a1,
         "a2": a2,
@@ -328,6 +340,8 @@ def get_sidebar_params():
         "T3": T3,
         "cross_ratio": cross_ratio,
         "prep_post_ratio": prep_post_ratio,
+        "sample_n": sample_n,
+        "mc_var": mc_var,
     }
 
 # Retrieve all sidebar input values as a dictionary (now session-state aware)
@@ -397,12 +411,7 @@ def run_mc(params: Dict[str, float], N: int) -> Tuple[np.ndarray, np.ndarray, np
     Evals = (Cvals + loss_units * Cvals * (1 - Svals)) / Svals
     return Evals, Svals, Cvals
 
-# Place Sample Size and MC Variable selection side-by-side
-col_mc1, col_mc2 = st.sidebar.columns(2)
-with col_mc1:
-    sample_n = col_mc1.number_input(
-        "Sample Size", 1000, 1000000, get_state("sample_n", 100000), step=10000, key="sample_n"
-    )
+sample_n = params.get("sample_n", get_state("sample_n", 100000))
 
 # Run vectorized and cached MC simulation
 Evals, Svals, Cvals = run_mc(params, sample_n)
@@ -541,6 +550,14 @@ with right:
     }
     rows=[]
     for k, v in params_for_sens.items():
+        # Skip automated steps: if a_i == 1 and corresponding T_i == 0, remove from tornado
+        if k in ("a1", "a2", "a3"):
+            ti = int(k[-1])
+            if params[k] == 1 and params[f"T{ti}"] == 0:
+                continue
+        # Skip parameters with no effect: b, cross_ratio, prep_post_ratio at zero
+        if k in ("b", "cross_ratio", "prep_post_ratio") and params.get(k if k != "b" else "b0", 0) == 0:
+            continue
         lo = max(v * 0.8, 0)
         hi = (min(v * 1.2, 1) if k in ("a1", "a2", "a3", "b") else v * 1.2)
         # Build kwargs for compute_metrics, filling all required arguments
@@ -571,10 +588,26 @@ with right:
         rows.append((k, max(rel_delta_lo, rel_delta_hi)))
     df_t=pd.DataFrame(rows, columns=["Parameter","RelChange"])\
            .sort_values("RelChange", ascending=False)
+    # Color bars grey for default values (a1-a3 == 1, b == 0, loss_unit == 0, cross_ratio == 0, prep_post_ratio == 0), else black
+    color_map = {}
+    for param in df_t["Parameter"]:
+        if param in ("a1", "a2", "a3") and params[param] == 1:
+            color_map[param] = "#808080"
+        elif param == "b" and params["b0"] == 0:
+            color_map[param] = "#808080"
+        elif param == "loss_unit" and params["loss_unit"] == 0:
+            color_map[param] = "#808080"
+        elif param == "cross_ratio" and params["cross_ratio"] == 0:
+            color_map[param] = "#808080"
+        elif param == "prep_post_ratio" and params["prep_post_ratio"] == 0:
+            color_map[param] = "#808080"
+        else:
+            color_map[param] = "#000000"
     # Standardize tornado axis/label
     fig_t = px.bar(
         df_t, x="RelChange", y="Parameter", orientation="h",
-        color_discrete_sequence=["#000000"],
+        color="Parameter",
+        color_discrete_map=color_map,
         labels={
             "RelChange": TXT["charts"]["tornado"]["xaxis"],
             "Parameter": ""
@@ -647,14 +680,7 @@ st.subheader(TXT["charts"]["monte_carlo"]["title"])
 # Monte Carlo Summary Statistics expander above the stats
 exp("charts.monte_carlo.expander_title")
 
-options = ["E_total", "Success S"]
-with col_mc2:
-    mc_var = col_mc2.selectbox(
-        TXT["charts"]["monte_carlo"]["variable"],
-        options,
-        index=options.index(get_state("mc_var", "E_total")),
-        key="mc_var"
-    )
+mc_var = params.get("mc_var", "E_total")
 data = Evals if mc_var == "E_total" else Svals
 ci_low, ci_high = np.percentile(data, [5, 95])
 mean = data.mean()
