@@ -35,14 +35,14 @@ Tested on macOS 14 (Python 3.9) and Ubuntu 22.04 (Python 3.10).
 
 The CLI version accepts the following optional arguments:
 
-- `--streamlit` — Launch only the Streamlit app  
-- `--gerrit` — Run Gerrit-related CLI extraction only  
-- `--all` (default) — Run both CLI and Streamlit in one go  
+- `streamlit` — Launch only the Streamlit app  
+- `gerrit` — Run Gerrit-related CLI extraction only  
+- `all` (default) — Run both CLI and Streamlit in one go  
 
 Examples:
 ```bash
-python src/main.py --streamlit
-python src/main.py --gerrit
+./run.sh streamlit
+./run.sh gerrit
 ```
 
 ---
