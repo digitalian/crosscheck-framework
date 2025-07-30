@@ -12,7 +12,7 @@ VENV=".venv"
 PYEXEC="python3"    # system python (3.9+ works fine)
 
 echo ">> Cleaning existing virtual environment …"
-rm -rf "${VENV}"
+#rm -rf "${VENV}"
 
 echo ">> Setting up virtual environment …"
 if [ ! -d "${VENV}" ]; then
