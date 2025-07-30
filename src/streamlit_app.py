@@ -646,7 +646,7 @@ Evals, Svals, Cvals, L_samples = run_mc(params, int(params["sample_n"]))
 def run_sobol(p: Dict[str, float], N: int = 10_000) -> pd.DataFrame:
     """
     Sobol analysis with bounds defined as (UI value ± α %)
-    α = 3 % for a₁,a₂,a₃, 10 % T, 20 % CR/PP/ℓ, 0.10 for b₀.
+    α = 3 % for a₁,a₂, 10 % a₃, 10 % T, 20 % CR/PP/ℓ, 0.10 for b₀.
     """
     # Bounds helper
     def clip(lo, hi, low=0.0, high=1e9, eps=1e-6):
@@ -664,7 +664,7 @@ def run_sobol(p: Dict[str, float], N: int = 10_000) -> pd.DataFrame:
         "bounds": [
             clip(p["a1"]*0.97, p["a1"]*1.03, 0, 1),
             clip(p["a2"]*0.97, p["a2"]*1.03, 0, 1),
-            clip(p["a3"]*0.97, p["a3"]*1.03, 0, 1),
+            clip(p["a3"]*0.90, p["a3"]*1.10, 0, 1),
             clip(p["b0"]-0.10, p["b0"]+0.10, 0, 1),
             clip(p["cross_ratio"]*0.8, p["cross_ratio"]*1.2, 0, 0.5),
             clip(p["prep_post_ratio"]*0.8, p["prep_post_ratio"]*1.2, 0, 0.5),
